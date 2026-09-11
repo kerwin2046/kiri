@@ -894,7 +894,7 @@ fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<()
                 .map_err(|_| "The selected video file is invalid.".to_string())?;
             (i64::from(width), i64::from(height), asset.duration)
         }
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         CaptureKind::Gif => {
             let reader = image::ImageReader::open(path)
                 .map_err(|_| "The selected GIF could not be read.".to_string())?
@@ -912,7 +912,7 @@ fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<()
                 asset.duration,
             )
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         CaptureKind::Video => crate::record::probe_video_native(path)
             .ok_or_else(|| "The selected media file is invalid.".to_string())?,
     };
@@ -1019,7 +1019,7 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
                     crate::gif::video_dimensions(&video_path).map_err(|error| error.to_string())?;
                 (i64::from(width), i64::from(height), pending.duration)
             };
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             let (pixel_width, pixel_height, duration) =
                 crate::record::probe_video_native(&video_path)
                     .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
@@ -1453,6 +1453,16 @@ fn export_gif_file(
     {
         let _ = app;
         crate::macos_media::export_gif(source_path, max_long_edge, fps)
+            .map(|(path, width, height, duration)| {
+                (path, width, height, duration.or(source_duration))
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        crate::linux_media::export_gif(source_path, max_long_edge, fps)
             .map(|(path, width, height, duration)| {
                 (path, width, height, duration.or(source_duration))
             })
@@ -2866,6 +2876,13 @@ pub async fn start_recording_flow(
         options.captures_system_audio = false;
         options.captures_microphone = false;
     }
+    #[cfg(target_os = "linux")]
+    {
+        // Portal ScreenCast audio and global click monitoring are not wired yet.
+        options.captures_system_audio = false;
+        options.captures_microphone = false;
+        options.highlights_clicks = false;
+    }
     #[cfg(target_os = "macos")]
     if options.captures_microphone {
         match platform::request_microphone_access() {
@@ -3330,7 +3347,7 @@ fn start_recorder(
     configuration: &RecordingConfiguration,
     senders: RecorderSenders,
 ) -> Result<StartedRecorder, String> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     let _ = app;
     #[cfg(target_os = "macos")]
     let ripple_excepted = platform::window_capture_id(app, "ripple")
@@ -3387,6 +3404,23 @@ fn start_recorder(
             recorder: Box::new(recorder),
             system_audio_spec,
             microphone_spec,
+        })
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let recorder = crate::capture::linux::LinuxRecorder::start(
+            configuration.region,
+            configuration.backing_scale,
+            configuration.options,
+            senders.video,
+            senders.system_audio,
+            senders.microphone,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(StartedRecorder {
+            recorder: Box::new(recorder),
+            system_audio_spec: None,
+            microphone_spec: None,
         })
     }
 }
@@ -3453,6 +3487,25 @@ fn start_encoder(
             )
             .map_err(|e| e.to_string())
         }
+        #[cfg(target_os = "linux")]
+        PreparedEncoder::LinuxNative => {
+            log::info!(
+                "start_encoder: Linux GStreamer H.264 {}x{}@{}, audio={}, mic={}",
+                encoder_config.width,
+                encoder_config.height,
+                encoder_config.fps,
+                encoder_config.audio.is_some(),
+                encoder_config.mic.is_some(),
+            );
+            crate::record::SegmentEncoder::start_linux_native(
+                &encoder_config,
+                out_path,
+                receivers.video,
+                receivers.system_audio,
+                receivers.microphone,
+            )
+            .map_err(|e| e.to_string())
+        }
     }
 }
 
@@ -3461,6 +3514,8 @@ enum PreparedEncoder {
     MacosNative,
     #[cfg(windows)]
     WindowsNative,
+    #[cfg(target_os = "linux")]
+    LinuxNative,
 }
 
 async fn prepare_encoder(
@@ -3476,6 +3531,11 @@ async fn prepare_encoder(
     {
         let _ = (_app, _output_format);
         Ok(PreparedEncoder::MacosNative)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (_app, _output_format);
+        Ok(PreparedEncoder::LinuxNative)
     }
 }
 
@@ -3556,7 +3616,7 @@ pub async fn begin_recording(app: AppHandle, session_id: Option<uuid::Uuid>) -> 
             let message = "Input Monitoring is off. Enable Kiri in System Settings to highlight clicks while recording.";
             #[cfg(target_os = "macos")]
             let recovery = Some(RecoveryAction::OpenInputMonitoringSettings);
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             let recovery = None;
             if reset_startup_if_current(&app, startup_token) {
                 emit_error(&app, message.into(), recovery);
@@ -4214,7 +4274,7 @@ fn finalize_recording(
             std::fs::copy(&segments[0], &merged_path)
                 .map_err(|error| format!("could not stage the Windows MP4: {error}"))?;
         } else {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             crate::record::merge_segments_native(&segments, &merged_path)
                 .map_err(|e| e.to_string())?;
             #[cfg(windows)]
@@ -4232,7 +4292,7 @@ fn finalize_recording(
                 })
                 .unwrap_or((0, 0, None))
         } else {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
                 crate::record::probe_video_native(&merged_path).unwrap_or((0, 0, None))
             }
@@ -4493,6 +4553,39 @@ pub fn mic_supported() -> bool {
     platform::mic_supported()
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilitiesDto {
+    pub recording: bool,
+    pub local_ocr: bool,
+    pub system_audio: bool,
+    pub microphone: bool,
+    pub click_highlights: bool,
+}
+
+#[tauri::command]
+pub fn platform_capabilities() -> PlatformCapabilitiesDto {
+    PlatformCapabilitiesDto {
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        recording: true,
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        recording: false,
+        #[cfg(any(windows, target_os = "macos"))]
+        local_ocr: true,
+        #[cfg(not(any(windows, target_os = "macos")))]
+        local_ocr: false,
+        #[cfg(any(windows, target_os = "macos"))]
+        system_audio: true,
+        #[cfg(not(any(windows, target_os = "macos")))]
+        system_audio: false,
+        microphone: platform::mic_supported(),
+        #[cfg(any(windows, target_os = "macos"))]
+        click_highlights: true,
+        #[cfg(not(any(windows, target_os = "macos")))]
+        click_highlights: false,
+    }
+}
+
 #[tauri::command]
 pub fn get_language(app: AppHandle) -> String {
     crate::state::load_language(&app)
@@ -4604,6 +4697,12 @@ pub fn open_settings(action: String) -> Result<(), String> {
         let _ = std::process::Command::new("cmd")
             .args(["/C", "start", url])
             .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = action;
+        // Screen sharing and microphone grants are handled by the desktop
+        // portal dialogs; there is no single portable settings URL.
     }
     Ok(())
 }

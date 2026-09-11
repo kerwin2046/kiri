@@ -99,3 +99,4 @@ development.
 - [0041 — Single-canvas video editing](adr/0041-single-canvas-video-editing.md)
 - [0042 — Readable tools and explicit layer order](adr/0042-readable-tools-and-layer-order.md)
 - [0043 — Editable video annotation objects](adr/0043-editable-video-annotation-objects.md)
+- [ADR 0034: Linux screenshot MVP and staged recording](adr/0034-linux-screenshot-mvp.md)
