@@ -9,7 +9,7 @@
   </p>
 </div>
 
-Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows, then select a window or region to capture, annotate, recognize text, or record. Screenshots are copied to the clipboard; screenshots, MP4 recordings, and GIFs are saved in the local library.
+Kiri supports macOS, Windows, and experimental Linux. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows and Linux, then select a window or region to capture, annotate, recognize text, or record. Screenshots are copied to the clipboard; screenshots, MP4 recordings, and GIFs are saved in the local library.
 
 <!-- project-demo-v1 -->
 <h2 align="center">Demo</h2>
@@ -36,12 +36,13 @@ Starting with v1.4.9, Settings can manually check, download, and install signatu
 
 - **macOS 14+**: download the Universal `.dmg` for Apple silicon and Intel, then drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+.
 - **Windows 11 (x64)**: an x64 installer is available. See the [roadmap](ROADMAP.md) for the remaining full capture-flow device acceptance. Run the `.exe` installer; screen capture needs no extra system permission, and microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn.
+- **Linux (experimental)**: build from source for now (`pnpm tauri build` produces an AppImage when Linux bundle targets are enabled). Capture uses the xdg-desktop-portal Screenshot and ScreenCast dialogs. Window hover outlines, local OCR, system audio, microphone, and click highlights are limited or unavailable depending on the compositor. Recording encodes with system GStreamer plugins and never downloads FFmpeg.
 
 macOS releases use the project's maintained local self-signed identity, not Developer ID signing or Apple notarization. If the first launch is blocked, Control-click `Kiri.app` and choose **Open**, or select **Open Anyway** in System Settings → Privacy & Security.
 
 ## Privacy
 
-Captures, local OCR, and encoding stay on your computer by default. Remote OCR is optional; API keys stay in macOS Keychain or Windows Credential Manager, and every request requires an explicit **Send** or **Retry** action.
+Captures, local OCR, and encoding stay on your computer by default. Remote OCR is optional; API keys stay in macOS Keychain, Windows Credential Manager, or the Linux Secret Service, and every request requires an explicit **Send** or **Retry** action.
 
 Re-editable screenshots keep an unannotated source locally, which may still contain pixels hidden by mosaic or shapes. Saving a crop also removes out-of-frame pixels. macOS uses AVFoundation and ImageIO for MP4 recording, merging, thumbnails, and GIF creation; Windows uses Media Foundation and system imaging components. Neither platform downloads FFmpeg, and media processing remains local.
 
@@ -61,7 +62,7 @@ macOS development builds also require a stable signing identity. Run and build t
 
 ## Shortcuts
 
-- **⇧⌘A** (macOS) / **Shift+Ctrl+A** (Windows): open Kiri
+- **⇧⌘A** (macOS) / **Shift+Ctrl+A** (Windows and Linux): open Kiri
 - **Esc**: cancel capture; stop while recording
 - **Return**: confirm a screenshot
 - **C**: crop in the screenshot editor
