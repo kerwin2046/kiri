@@ -1,0 +1,35 @@
+{
+  "version": "1.5.1",
+  "source_commit": "fbd3032124e5862bec86f69beade5fde0cad43e5",
+  "date": "2026-09-14",
+  "native_end_to_end": false,
+  "duration_seconds": 135.5,
+  "dimensions": [
+    3840,
+    2160
+  ],
+  "fps": 60,
+  "frames": 8130,
+  "languages": [
+    "zh",
+    "en"
+  ],
+  "recording": "Actual production frontend operated through ego-lite in an isolated documentation host. Native APIs are substituted at the boundary; dedicated sample data only. Edited and framed with Remotion.",
+  "ocr": "Actual macOS Vision recognition of sample images; no remote OCR request.",
+  "recording_preview": "Browser-recorded original sample interaction; GIF is converted from the sample. Native screen encoder is not exercised.",
+  "revisions": [
+    "Removed underlying sample-page white strip behind opaque app windows.",
+    "Corrected selection-border occlusion of the mode selector.",
+    "Replaced English narration with Ana Neural at natural pitch."
+  ],
+  "voice": {
+    "zh": "Microsoft zh-CN-XiaoyiNeural",
+    "en": "Microsoft en-US-AnaNeural"
+  },
+  "music": "Original synthesized score, ducked beneath narration.",
+  "personal_data": "No personal library, private captures, credentials, or native desktop screenshots included.",
+  "website": {
+    "en": "https://kiri.yuxino.cn/#demo",
+    "zh": "https://kiri.yuxino.cn/zh/#demo"
+  }
+}

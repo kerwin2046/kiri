@@ -13,12 +13,9 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 
 <!-- project-demo-v1 -->
 <h2 align="center">Demo</h2>
-
-<p align="center">
-  <a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
-</p>
-<p align="center">Capture, annotate, recognize text, and record your screen. Keep everything together in the library.</p>
-<p align="center"><a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4">Watch video</a></p>
+<p align="center"><a href="https://kiri.yuxino.cn/#demo"><img src="docs/demos/preview.gif?v=20260914-4k" alt="Kiri 4K feature tour"></a></p>
+<p align="center">A complete feature tour with female narration and captions, in 4K at 60 fps.</p>
+<p align="center"><a href="https://kiri.yuxino.cn/#demo">Watch in English</a> · <a href="https://kiri.yuxino.cn/zh/#demo">观看中文版</a> · <a href="docs/demos/full-tour-4k.json">Recording details</a></p>
 <!-- /project-demo-v1 -->
 
 ## Features

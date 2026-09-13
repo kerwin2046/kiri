@@ -13,12 +13,9 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 
 <!-- project-demo-v1 -->
 <h2 align="center">演示</h2>
-
-<p align="center">
-  <a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
-</p>
-<p align="center">截图、标注、识别文字和录屏，在素材库里统一查看。</p>
-<p align="center"><a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4">观看视频</a></p>
+<p align="center"><a href="https://kiri.yuxino.cn/zh/#demo"><img src="docs/demos/preview.gif?v=20260914-4k" alt="Kiri 4K feature tour"></a></p>
+<p align="center">中文女声旁白、字幕与完整功能演示，4K / 60 帧。</p>
+<p align="center"><a href="https://kiri.yuxino.cn/#demo">Watch in English</a> · <a href="https://kiri.yuxino.cn/zh/#demo">观看中文版</a> · <a href="docs/demos/full-tour-4k.json">演示说明</a></p>
 <!-- /project-demo-v1 -->
 
 ## 功能
