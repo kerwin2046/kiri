@@ -20,16 +20,20 @@
   "revisions": [
     "Removed underlying sample-page white strip behind opaque app windows.",
     "Corrected selection-border occlusion of the mode selector.",
-    "Replaced English narration with Ana Neural at natural pitch."
+    "Replaced English narration with Aria Neural at natural pitch."
   ],
   "voice": {
     "zh": "Microsoft zh-CN-XiaoyiNeural",
-    "en": "Microsoft en-US-AnaNeural"
+    "en": "Microsoft en-US-AriaNeural"
   },
   "music": "Original synthesized score, ducked beneath narration.",
   "personal_data": "No personal library, private captures, credentials, or native desktop screenshots included.",
   "website": {
     "en": "https://kiri.yuxino.cn/#demo",
     "zh": "https://kiri.yuxino.cn/zh/#demo"
+  },
+  "readme_videos": {
+    "zh": "https://github.com/user-attachments/assets/8235d7a4-d1fa-44de-a852-8549b9aa6459",
+    "en": "https://github.com/user-attachments/assets/4022a472-0ad2-4067-b965-cca8d5cbbab9"
   }
 }

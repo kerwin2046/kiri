@@ -13,8 +13,10 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 
 <!-- project-demo-v1 -->
 <h2 align="center">Demo</h2>
-<p align="center"><a href="https://kiri.yuxino.cn/#demo"><img src="docs/demos/preview.gif?v=20260914-4k" alt="Kiri 4K feature tour"></a></p>
-<p align="center">A complete feature tour with female narration and captions, in 4K at 60 fps.</p>
+
+https://github.com/user-attachments/assets/4022a472-0ad2-4067-b965-cca8d5cbbab9
+
+<p align="center">A complete 4K, 60 fps feature tour with English female narration and captions. Play it right here.</p>
 <p align="center"><a href="https://kiri.yuxino.cn/#demo">Watch in English</a> · <a href="https://kiri.yuxino.cn/zh/#demo">观看中文版</a> · <a href="docs/demos/full-tour-4k.json">Recording details</a></p>
 <!-- /project-demo-v1 -->
 
