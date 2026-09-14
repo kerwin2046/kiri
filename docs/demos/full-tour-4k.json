@@ -20,20 +20,22 @@
   "revisions": [
     "Removed underlying sample-page white strip behind opaque app windows.",
     "Corrected selection-border occlusion of the mode selector.",
-    "Replaced English narration with Aria Neural at natural pitch."
+    "Replaced English narration with Aria Neural at natural pitch.",
+    "The first frame is a complete 4K cover; the original intro motion resumes at 2.5 seconds without shifting chapters.",
+    "Removed synthetic breath-like transition sounds."
   ],
   "voice": {
     "zh": "Microsoft zh-CN-XiaoyiNeural",
     "en": "Microsoft en-US-AriaNeural"
   },
-  "music": "Original synthesized score, ducked beneath narration.",
+  "music": "Original synthesized score, ducked beneath narration. No breath-like chapter transition effects.",
   "personal_data": "No personal library, private captures, credentials, or native desktop screenshots included.",
   "website": {
     "en": "https://kiri.yuxino.cn/#demo",
     "zh": "https://kiri.yuxino.cn/zh/#demo"
   },
   "readme_videos": {
-    "zh": "https://github.com/user-attachments/assets/8235d7a4-d1fa-44de-a852-8549b9aa6459",
-    "en": "https://github.com/user-attachments/assets/4022a472-0ad2-4067-b965-cca8d5cbbab9"
+    "zh": "https://github.com/user-attachments/assets/13742f07-1845-4201-9295-39f83515547f",
+    "en": "https://github.com/user-attachments/assets/367fe955-b396-4f98-b3f2-aa5cb41b6d37"
   }
 }
