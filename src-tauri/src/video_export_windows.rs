@@ -1,7 +1,7 @@
 //! Windows native timeline renderer. Coordinates are normalized to the source frame.
 use super::{
     validate_annotation_duration, validate_effects, validate_segments, PreparedVideoAnnotation,
-    VideoEffect, VideoEffectKind, VideoExportPreset, VideoSegment,
+    VideoEffect, VideoEffectKind, VideoExportPreset, VideoMaskStyle, VideoSegment,
 };
 use anyhow::{bail, Context, Result};
 use std::{collections::HashMap, path::Path};
@@ -81,7 +81,13 @@ pub(super) fn platform_export(
         bail!("Windows cannot apply video effects to rotated source videos; export an upright copy first");
     }
     let profile = MediaEncodingProfile::CreateFromFileAsync(&input)?.join()?;
-    if !annotations.is_empty() {
+    let requires_frame_render = !annotations.is_empty()
+        || effects.iter().any(|effect| {
+            (effect.kind == VideoEffectKind::Zoom && effect.transition > 0.0)
+                || (effect.kind == VideoEffectKind::Mask
+                    && (effect.mask_style != VideoMaskStyle::Solid || effect.color != 0))
+        });
+    if requires_frame_render {
         let staging = tempfile::Builder::new()
             .prefix("kiri-video-annotations-")
             .tempdir()?;
@@ -91,6 +97,7 @@ pub(super) fn platform_export(
             &silent_path,
             source_clip.OriginalDuration()?.Duration,
             annotations,
+            effects,
             &profile,
         )?;
         let tracks = source_clip.EmbeddedAudioTracks()?;
@@ -121,7 +128,7 @@ pub(super) fn platform_export(
         } else {
             silent_path
         };
-        return platform_export(&annotated_source, output, &segments, effects, &[], preset);
+        return platform_export(&annotated_source, output, &segments, &[], &[], preset);
     }
     let video = profile.Video()?;
     let (width, height) = (video.Width()?, video.Height()?);
@@ -479,6 +486,7 @@ mod tests {
                     y: 0.25,
                     width: 0.5,
                     height: 0.5,
+                    ..Default::default()
                 },
                 VideoEffect {
                     kind: VideoEffectKind::Mask,
@@ -488,6 +496,7 @@ mod tests {
                     y: 0.3,
                     width: 0.1,
                     height: 0.1,
+                    ..Default::default()
                 },
             ],
             &[],
@@ -643,6 +652,117 @@ mod tests {
                 "overlay timing wrong at {time}: {clear:?}"
             );
         }
+        let styled_output = directory.join("styled-effects.mp4");
+        platform_export(
+            &source_path,
+            &styled_output,
+            &[VideoSegment {
+                start: 0.0,
+                end: 4.0,
+            }],
+            &[
+                VideoEffect {
+                    kind: VideoEffectKind::Mask,
+                    start: 0.25,
+                    end: 3.75,
+                    x: 20.0 / 320.0,
+                    y: 100.0 / 180.0,
+                    width: 0.25,
+                    height: 60.0 / 180.0,
+                    mask_style: VideoMaskStyle::Blur,
+                    strength: 1.0,
+                    ..Default::default()
+                },
+                VideoEffect {
+                    kind: VideoEffectKind::Mask,
+                    start: 0.25,
+                    end: 3.75,
+                    x: 200.0 / 320.0,
+                    y: 100.0 / 180.0,
+                    width: 0.25,
+                    height: 60.0 / 180.0,
+                    mask_style: VideoMaskStyle::Pixelate,
+                    strength: 1.0,
+                    ..Default::default()
+                },
+                VideoEffect {
+                    kind: VideoEffectKind::Mask,
+                    start: 0.25,
+                    end: 1.75,
+                    x: 0.7,
+                    y: 0.1,
+                    width: 0.1,
+                    height: 0.1,
+                    color: 0x20cc80,
+                    ..Default::default()
+                },
+                VideoEffect {
+                    kind: VideoEffectKind::Zoom,
+                    start: 2.0,
+                    end: 4.0,
+                    x: 0.25,
+                    y: 0.25,
+                    width: 0.5,
+                    height: 0.5,
+                    transition: 0.6,
+                    ..Default::default()
+                },
+            ],
+            &[],
+            VideoExportPreset::Original,
+        )?;
+        let styled = MediaComposition::new()?;
+        let styled_clip = MediaClip::CreateFromFileAsync(&storage_file(&styled_output)?)?.join()?;
+        assert!(
+            styled_clip.EmbeddedAudioTracks()?.Size()? > 0,
+            "styled effects dropped audio"
+        );
+        assert!((styled_clip.OriginalDuration()?.Duration - ticks(4.0)).abs() < ticks(0.1));
+        styled.Clips()?.Append(&styled_clip)?;
+        for (time, dominant) in [(0.5, 0), (2.05, 2)] {
+            for x in [60, 220] {
+                let value = pixel(&styled, "styled", time, x, 120)?;
+                assert!(
+                    value[dominant] > 180 && value[1] > 60 && value[1] < 200,
+                    "styled live mask failed at {time}, x={x}: {value:?}"
+                );
+            }
+        }
+        let color = pixel(&styled, "styled", 0.5, 240, 27)?;
+        assert!(
+            color
+                .iter()
+                .zip([32_i16, 204, 128])
+                .all(|(actual, expected)| (i16::from(*actual) - expected).abs() < 35),
+            "mask color wrong: {color:?}"
+        );
+        let after_color = pixel(&styled, "styled", 1.9, 240, 27)?;
+        assert!(
+            after_color[0] > 180 && after_color[1] < 60 && after_color[2] < 60,
+            "color mask outlived interval"
+        );
+        for time in [2.05, 3.95] {
+            let original_marker = pixel(&styled, "styled", time, 100, 56)?;
+            let target_marker = pixel(&styled, "styled", time, 64, 36)?;
+            assert!(
+                original_marker[1] > 180 && original_marker[0] < 60 && original_marker[2] < 60,
+                "zoom entrance/exit is not near full frame at {time}: {original_marker:?}"
+            );
+            assert!(
+                target_marker[2] > 180 && target_marker[1] < 60,
+                "zoom snapped to its target at ramp endpoint {time}: {target_marker:?}"
+            );
+        }
+        let halfway = pixel(&styled, "styled", 2.3, 96, 54)?;
+        assert!(
+            halfway[1] > 180 && halfway[0] < 60 && halfway[2] < 60,
+            "zoom intermediate camera position missing: {halfway:?}"
+        );
+        let held = pixel(&styled, "styled", 2.9, 64, 36)?;
+        assert!(
+            held[1] > 180 && held[0] < 60 && held[2] < 60,
+            "zoom never reached target: {held:?}"
+        );
         Ok(())
     }
 
@@ -655,6 +775,7 @@ mod tests {
             y,
             width,
             height,
+            ..Default::default()
         }
     }
 

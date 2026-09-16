@@ -1,5 +1,7 @@
 //! Bounded-memory, timestamp-preserving native annotation prepass.
-use super::super::{PreparedVideoAnnotation, VideoAnnotationKind};
+use super::super::{
+    PreparedVideoAnnotation, VideoAnnotationKind, VideoEffect, VideoEffectKind, VideoMaskStyle,
+};
 use anyhow::{bail, Context, Result};
 use image::{imageops, RgbaImage};
 use std::path::Path;
@@ -12,6 +14,7 @@ pub(super) fn render(
     destination: &Path,
     duration: i64,
     annotations: &[PreparedVideoAnnotation],
+    effects: &[VideoEffect],
     profile: &MediaEncodingProfile,
 ) -> Result<()> {
     // Reader owns the Media Foundation startup guard until writer resources drop.
@@ -74,18 +77,41 @@ pub(super) fn render(
                         }
                     }
                 }
+                for effect in effects {
+                    let ramp = effect.transition.min((effect.end - effect.start) / 2.0);
+                    for boundary in [
+                        effect.start,
+                        effect.start + ramp,
+                        effect.end - ramp,
+                        effect.end,
+                    ] {
+                        let time = super::ticks(boundary);
+                        if time > start && time < end {
+                            boundaries.push(time);
+                        }
+                    }
+                }
                 boundaries.sort_unstable();
                 boundaries.dedup();
                 for interval in boundaries.windows(2) {
-                    let mut frame = pending.1.clone();
-                    paint(&mut frame, interval[0], annotations)?;
-                    write_frame(
-                        &writer,
-                        stream,
-                        &frame,
-                        interval[0],
-                        interval[1] - interval[0],
-                    )?;
+                    let mut timestamp = interval[0];
+                    while timestamp < interval[1] {
+                        // Long VFR frames need intermediate camera positions during
+                        // ramps. Stream these samples instead of allocating a timeline.
+                        let next = if zoom_is_animating(effects, timestamp) {
+                            let cadence = (10_000_000_i64 * i64::from(denominator)
+                                / i64::from(numerator))
+                            .max(83_333);
+                            (timestamp + cadence).min(interval[1])
+                        } else {
+                            interval[1]
+                        };
+                        let mut frame = pending.1.clone();
+                        paint(&mut frame, timestamp, annotations)?;
+                        paint_effects(&mut frame, timestamp, effects)?;
+                        write_frame(&writer, stream, &frame, timestamp, next - timestamp)?;
+                        timestamp = next;
+                    }
                 }
             }
             let Some(next) = following else {
@@ -217,4 +243,139 @@ fn paint(frame: &mut RgbaImage, time: i64, annotations: &[PreparedVideoAnnotatio
         }
     }
     Ok(())
+}
+
+fn zoom_is_animating(effects: &[VideoEffect], timestamp: i64) -> bool {
+    let time = timestamp as f64 / 10_000_000.0;
+    effects.iter().any(|effect| {
+        if effect.kind != VideoEffectKind::Zoom || effect.transition <= 0.0 {
+            return false;
+        }
+        let ramp = effect.transition.min((effect.end - effect.start) / 2.0);
+        timestamp >= super::ticks(effect.start)
+            && timestamp < super::ticks(effect.end)
+            && (time < effect.start + ramp || time >= effect.end - ramp)
+    })
+}
+
+fn zoom_viewport(effect: &VideoEffect, time: f64) -> (f64, f64, f64, f64) {
+    let ramp = effect.transition.min((effect.end - effect.start) / 2.0);
+    let progress = if ramp > 0.0 {
+        ((time - effect.start) / ramp)
+            .clamp(0.0, 1.0)
+            .min(((effect.end - time) / ramp).clamp(0.0, 1.0))
+    } else {
+        1.0
+    };
+    let eased = progress * progress * (3.0 - 2.0 * progress);
+    (
+        effect.x * eased,
+        effect.y * eased,
+        1.0 + (effect.width - 1.0) * eased,
+        1.0 + (effect.height - 1.0) * eased,
+    )
+}
+
+fn paint_effects(frame: &mut RgbaImage, timestamp: i64, effects: &[VideoEffect]) -> Result<()> {
+    let time = timestamp as f64 / 10_000_000.0;
+    for effect in effects.iter().filter(|effect| {
+        effect.kind == VideoEffectKind::Mask
+            && timestamp >= super::ticks(effect.start)
+            && timestamp < super::ticks(effect.end)
+    }) {
+        let left = (effect.x * frame.width() as f64).floor() as u32;
+        let top = (effect.y * frame.height() as f64).floor() as u32;
+        let right =
+            (((effect.x + effect.width) * frame.width() as f64).ceil() as u32).min(frame.width());
+        let bottom = (((effect.y + effect.height) * frame.height() as f64).ceil() as u32)
+            .min(frame.height());
+        if right <= left || bottom <= top {
+            continue;
+        }
+        let (width, height) = (right - left, bottom - top);
+        let region = imageops::crop_imm(frame, left, top, width, height).to_image();
+        let filtered = match effect.mask_style {
+            VideoMaskStyle::Solid => RgbaImage::from_pixel(
+                width,
+                height,
+                image::Rgba([
+                    (effect.color >> 16) as u8,
+                    (effect.color >> 8) as u8,
+                    effect.color as u8,
+                    255,
+                ]),
+            ),
+            VideoMaskStyle::Pixelate => {
+                let block = (frame.width() as f64 * (0.005 + 0.045 * effect.strength))
+                    .max(2.0)
+                    .ceil() as u32;
+                let small = imageops::resize(
+                    &region,
+                    width.div_ceil(block).max(1),
+                    height.div_ceil(block).max(1),
+                    imageops::FilterType::Triangle,
+                );
+                imageops::resize(&small, width, height, imageops::FilterType::Nearest)
+            }
+            VideoMaskStyle::Blur => {
+                let radius =
+                    (frame.width() as f64 * (0.003 + 0.027 * effect.strength)).max(1.0) as f32;
+                let scale = (radius / 16.0).max(1.0);
+                let small = imageops::resize(
+                    &region,
+                    ((width as f32 / scale).ceil() as u32).max(1),
+                    ((height as f32 / scale).ceil() as u32).max(1),
+                    imageops::FilterType::Triangle,
+                );
+                let blurred = imageops::blur(&small, radius / scale);
+                imageops::resize(&blurred, width, height, imageops::FilterType::Triangle)
+            }
+        };
+        imageops::replace(frame, &filtered, i64::from(left), i64::from(top));
+    }
+    if let Some(effect) = effects.iter().find(|effect| {
+        effect.kind == VideoEffectKind::Zoom
+            && timestamp >= super::ticks(effect.start)
+            && timestamp < super::ticks(effect.end)
+    }) {
+        let (left, top, width, height) = zoom_viewport(effect, time);
+        if width < 1.0 || height < 1.0 {
+            // Fractional sampling avoids one-pixel jumps while the camera eases.
+            let zoomed = RgbaImage::from_fn(frame.width(), frame.height(), |x, y| {
+                let u =
+                    (left + (x as f64 + 0.5) / frame.width() as f64 * width).clamp(0.0, 1.0) as f32;
+                let v = (top + (y as f64 + 0.5) / frame.height() as f64 * height).clamp(0.0, 1.0)
+                    as f32;
+                imageops::sample_bilinear(frame, u, v)
+                    .expect("validated nonempty video frame and viewport")
+            });
+            *frame = zoomed;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_enters_holds_and_returns_to_full_frame_symmetrically() {
+        let effect = VideoEffect {
+            kind: VideoEffectKind::Zoom,
+            start: 1.0,
+            end: 4.0,
+            x: 0.25,
+            y: 0.25,
+            width: 0.5,
+            height: 0.5,
+            transition: 1.0,
+            ..Default::default()
+        };
+        assert_eq!(zoom_viewport(&effect, 1.0), (0.0, 0.0, 1.0, 1.0));
+        assert_eq!(zoom_viewport(&effect, 1.5), (0.125, 0.125, 0.75, 0.75));
+        assert_eq!(zoom_viewport(&effect, 2.5), (0.25, 0.25, 0.5, 0.5));
+        assert_eq!(zoom_viewport(&effect, 3.5), zoom_viewport(&effect, 1.5));
+        assert_eq!(zoom_viewport(&effect, 4.0), (0.0, 0.0, 1.0, 1.0));
+    }
 }

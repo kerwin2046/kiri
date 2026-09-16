@@ -4,7 +4,13 @@
 #import <math.h>
 
 typedef struct { double start; double end; } KiriVideoSegment;
-typedef struct { unsigned kind; double start, end, x, y, width, height; } KiriVideoEffect;
+typedef struct {
+    unsigned kind;
+    double start, end, x, y, width, height;
+    unsigned maskStyle;
+    double strength, transition;
+    unsigned color;
+} KiriVideoEffect;
 typedef struct {
     unsigned kind;
     double start, end, x, y, width, height, amount;
@@ -140,15 +146,39 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         CGRect mask = CGRectMake(extent.origin.x + effect.x * extent.size.width,
                             extent.origin.y + (1 - effect.y - effect.height) * extent.size.height,
                             effect.width * extent.size.width, effect.height * extent.size.height);
-                        CIImage *cover = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:1]] imageByCroppingToRect:CGRectIntegral(mask)];
-                        image = [cover imageByCompositingOverImage:image];
+                        if (effect.maskStyle == 0) {
+                            CIColor *color = [CIColor colorWithRed:((effect.color >> 16) & 255) / 255.0
+                                green:((effect.color >> 8) & 255) / 255.0 blue:(effect.color & 255) / 255.0 alpha:1];
+                            CIImage *cover = [[CIImage imageWithColor:color] imageByCroppingToRect:CGRectIntegral(mask)];
+                            image = [cover imageByCompositingOverImage:image];
+                        } else {
+                            double amount = effect.maskStyle == 1
+                                ? MAX(1, extent.size.width * (0.003 + 0.027 * effect.strength))
+                                : MAX(2, extent.size.width * (0.005 + 0.045 * effect.strength));
+                            NSString *filter = effect.maskStyle == 1 ? @"CIGaussianBlur" : @"CIPixellate";
+                            NSString *parameter = effect.maskStyle == 1 ? kCIInputRadiusKey : kCIInputScaleKey;
+                            CIImage *processed = [[image imageByClampingToExtent] imageByApplyingFilter:filter
+                                withInputParameters:@{parameter: @(amount)}];
+                            processed = [processed imageByCroppingToRect:CGRectIntegral(mask)];
+                            image = [processed imageByCompositingOverImage:image];
+                        }
                     }
                     for (size_t index = 0; index < effectCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 0 || sourceTime < effect.start || sourceTime >= effect.end) continue;
-                        CGRect crop = CGRectMake(extent.origin.x + effect.x * extent.size.width,
-                            extent.origin.y + (1 - effect.y - effect.height) * extent.size.height,
-                            effect.width * extent.size.width, effect.height * extent.size.height);
+                        double ease = 1;
+                        double ramp = MIN(effect.transition, (effect.end - effect.start) / 2);
+                        if (ramp > 0) {
+                            double progress = MIN(MIN(1, MAX(0, (sourceTime - effect.start) / ramp)),
+                                MIN(1, MAX(0, (effect.end - sourceTime) / ramp)));
+                            ease = progress * progress * (3 - 2 * progress);
+                        }
+                        double x = effect.x * ease, y = effect.y * ease;
+                        double cropWidth = 1 + (effect.width - 1) * ease;
+                        double cropHeight = 1 + (effect.height - 1) * ease;
+                        CGRect crop = CGRectMake(extent.origin.x + x * extent.size.width,
+                            extent.origin.y + (1 - y - cropHeight) * extent.size.height,
+                            cropWidth * extent.size.width, cropHeight * extent.size.height);
                         image = [image imageByCroppingToRect:crop];
                         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-crop.origin.x, -crop.origin.y)];
                         image = [image imageByApplyingTransform:CGAffineTransformMakeScale(extent.size.width / crop.size.width, extent.size.height / crop.size.height)];

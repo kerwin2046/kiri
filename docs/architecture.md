@@ -392,7 +392,7 @@ annotation canvas publishes editable marks into a shared, bounded undo history.
 Navigation and export commit pending text before reading the document snapshot. A separate
 video decoder extracts twelve small timeline thumbnails, while preview playback
 skips removed source intervals. Editing effect geometry shows the full source;
-the canvas preview applies opaque masks before zooming, matching native export. `export_video_copy` accepts an asset ID only from its matching viewer.
+the canvas preview applies blur, pixelation or RGB solid masks before smoothstep zooming, matching native export. `export_video_copy` accepts an asset ID only from its matching viewer.
 A single-flight worker opens the readable source under the library lock,
 copies a snapshot outside the lock, then uses AVFoundation or Windows MediaComposition to concatenate the retained
 intervals and render a new MP4. Native
@@ -401,6 +401,7 @@ rectangles and source-time effect ranges (at most 128). macOS maps composition
 time back to source time for CI effects. Windows splits intervals at effect
 boundaries, crops zoom clips through MediaTranscoder into temporary native MP4
 segments, then composes them and maps black overlays into each output viewport.
+Styled masks and animated zooms use the bounded Media Foundation frame pass instead of static crop segments; source-time transitions are sampled at the source frame rate (capped at 120 fps). Zoom ramps are clamped to half the effect duration and use the same smoothstep viewport function as the preview. Legacy payloads default to black solid masks and zero transition duration.
 Rotated Windows inputs reject effects explicitly to avoid misplaced masks. Import checks the original library
 identity and generation before adding a separate asset; temporary files are
 removed on failure and the original asset is never overwritten. The library

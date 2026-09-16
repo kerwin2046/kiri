@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import ts from "typescript";
 const source = readFileSync(new URL("../src/windows/video-effects.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.ESNext}}).outputText;
-const {activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, validVideoEffect} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const {activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, resizeVideoEffectFromHandle, videoZoomViewport, validVideoEffect} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 
 test("new zoom clips at the next zoom and refuses overlapping placement", () => {
   const existing = {...createVideoEffect("zoom", 4, 10, []), id:"first"};
@@ -57,4 +57,47 @@ test("effect creation caps the document at the native export limit", () => {
   assert.equal(createVideoEffect("mask", 0, 2, effects), null);
   assert.equal(createVideoEffect("zoom", 0, 2, effects), null);
   assert.ok(createVideoEffect("mask", 0, 2, effects.slice(1)));
+});
+
+
+test("all eight mask handles preserve the opposite edges and stay in bounds",()=>{
+ const mask={...createVideoEffect("mask",0,5,[]),x:.25,y:.25,width:.5,height:.5};
+ for(const handle of ["nw","n","ne","e","se","s","sw","w"]){
+  for(const [dx,dy] of [[.1,.08],[-2,-2],[2,2]]){
+   const next=resizeVideoEffectFromHandle(mask,dx,dy,handle);
+   assert.ok(validVideoEffect(next,[],5),handle);
+   if(handle.includes("w"))assert.ok(Math.abs(next.x+next.width-.75)<1e-9);
+   if(handle.includes("n"))assert.ok(Math.abs(next.y+next.height-.75)<1e-9);
+  }
+ }
+});
+
+test("zoom handle resizing anchors opposite edges and preserves aspect",()=>{
+ const zoom=createVideoEffect("zoom",0,5,[]);
+ for(const handle of ["nw","n","ne","e","se","s","sw","w"]){
+  const next=resizeVideoEffectFromHandle(zoom,.12,-.09,handle);
+  assert.ok(validVideoEffect(next,[],5),handle);
+  assert.equal(next.width,next.height);
+ }
+ const northWest=resizeVideoEffectFromHandle(zoom,.1,.1,"nw");
+ assert.ok(Math.abs(northWest.x+northWest.width-(zoom.x+zoom.width))<1e-9);
+ assert.ok(Math.abs(northWest.y+northWest.height-(zoom.y+zoom.height))<1e-9);
+});
+
+test("smooth zoom eases from full frame, holds and returns without a jump",()=>{
+ const zoom={...createVideoEffect("zoom",1,6,[]),end:4,transition:.5};
+ assert.deepEqual(videoZoomViewport(zoom,1),{x:0,y:0,width:1,height:1});
+ assert.deepEqual(videoZoomViewport(zoom,2),{x:zoom.x,y:zoom.y,width:zoom.width,height:zoom.height});
+ assert.deepEqual(videoZoomViewport(zoom,1.25),videoZoomViewport(zoom,3.75));
+ assert.deepEqual(videoZoomViewport(zoom,4),{x:0,y:0,width:1,height:1});
+ assert.equal(videoZoomViewport({...zoom,end:1.1,transition:2},1.05).width,zoom.width);
+ assert.equal(videoZoomViewport({...zoom,transition:0},1).width,zoom.width);
+});
+
+test("effect styles reject invalid parameters and preserve old payload defaults",()=>{
+ const mask=createVideoEffect("mask",0,5,[]);
+ assert.equal(mask.maskStyle,"blur");
+ for(const patch of [{strength:NaN},{strength:1.1},{color:-1},{color:0x1000000},{color:1.2},{transition:3},{maskStyle:"unknown"}])assert.equal(validVideoEffect({...mask,...patch},[],5),false);
+ const {maskStyle,strength,color,...legacy}=mask;
+ assert.ok(validVideoEffect(legacy,[],5));
 });

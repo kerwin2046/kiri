@@ -35,8 +35,23 @@ pub enum VideoEffectKind {
     Mask,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoMaskStyle {
+    #[default]
+    Solid,
+    Blur,
+    Pixelate,
+}
+
+fn default_effect_strength() -> f64 {
+    0.5
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VideoEffect {
     pub kind: VideoEffectKind,
     pub start: f64,
@@ -45,6 +60,32 @@ pub struct VideoEffect {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default)]
+    pub mask_style: VideoMaskStyle,
+    #[serde(default = "default_effect_strength")]
+    pub strength: f64,
+    #[serde(default)]
+    pub transition: f64,
+    #[serde(default)]
+    pub color: u32,
+}
+
+impl Default for VideoEffect {
+    fn default() -> Self {
+        Self {
+            kind: VideoEffectKind::Zoom,
+            start: 0.0,
+            end: 0.0,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            mask_style: VideoMaskStyle::Solid,
+            strength: default_effect_strength(),
+            transition: 0.0,
+            color: 0,
+        }
+    }
 }
 
 #[repr(u32)]
@@ -213,6 +254,14 @@ fn validate_effects(effects: &[VideoEffect], duration: Option<f64>) -> Result<()
             || duration.is_some_and(|duration| end > duration + 0.05 || start >= duration)
         {
             bail!("Invalid video effect range or rectangle");
+        }
+        if !effect.strength.is_finite()
+            || !(0.0..=1.0).contains(&effect.strength)
+            || !effect.transition.is_finite()
+            || !(0.0..=2.0).contains(&effect.transition)
+            || effect.color > 0x00ff_ffff
+        {
+            bail!("Invalid video effect strength, transition or color");
         }
         if effect.kind == VideoEffectKind::Zoom {
             if (width - height).abs() > 0.000001 {
@@ -490,6 +539,7 @@ mod tests {
             y: 0.0,
             width: 0.5,
             height: 0.5,
+            ..Default::default()
         };
         assert!(validate_effects(&[effect], Some(2.0)).is_ok());
         assert!(validate_effects(&[effect, effect], Some(2.0)).is_err());
@@ -511,6 +561,216 @@ mod tests {
             Some(2.0)
         )
         .is_err());
+    }
+
+    #[test]
+    fn legacy_effect_payloads_keep_solid_masks_and_hard_cut_zoom() {
+        let effect: VideoEffect = serde_json::from_value(serde_json::json!({
+            "kind":"mask", "start":0.0, "end":1.0, "x":0.0, "y":0.0, "width":0.5, "height":0.5
+        }))
+        .unwrap();
+        assert_eq!(effect.mask_style, VideoMaskStyle::Solid);
+        assert_eq!(
+            (effect.strength, effect.transition, effect.color),
+            (0.5, 0.0, 0)
+        );
+        let styled: VideoEffect = serde_json::from_value(serde_json::json!({
+            "kind":"mask", "start":0.0, "end":1.0, "x":0.0, "y":0.0, "width":0.5, "height":0.5,
+            "maskStyle":"pixelate", "strength":0.8, "transition":0.3, "color":3359829
+        }))
+        .unwrap();
+        assert_eq!(styled.mask_style, VideoMaskStyle::Pixelate);
+        assert_eq!(
+            (styled.strength, styled.transition, styled.color),
+            (0.8, 0.3, 3359829)
+        );
+        for invalid in [
+            VideoEffect {
+                strength: f64::NAN,
+                ..effect
+            },
+            VideoEffect {
+                strength: 1.1,
+                ..effect
+            },
+            VideoEffect {
+                transition: -0.1,
+                ..effect
+            },
+            VideoEffect {
+                transition: 2.1,
+                ..effect
+            },
+            VideoEffect {
+                color: 0x0100_0000,
+                ..effect
+            },
+        ] {
+            assert!(validate_effects(&[invalid], Some(2.0)).is_err());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_mask_styles_use_live_frames_and_custom_solid_color() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("mask-styles.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 128, 96, 30, 2_000_000, false).unwrap();
+        for index in 0..90 {
+            let mut frame = vec![0u8; 128 * 96 * 4];
+            for y in 0..96 {
+                for x in 0..128 {
+                    let channel = if index < 30 {
+                        2
+                    } else if index < 60 {
+                        1
+                    } else {
+                        0
+                    };
+                    frame[(y * 128 + x) * 4 + channel] = if x % 4 < 2 { 255 } else { 90 };
+                    frame[(y * 128 + x) * 4 + 3] = 255;
+                }
+            }
+            assert!(encoder.append_video(&frame, index).unwrap());
+        }
+        encoder.finish().unwrap();
+        for mask_style in [
+            VideoMaskStyle::Solid,
+            VideoMaskStyle::Blur,
+            VideoMaskStyle::Pixelate,
+        ] {
+            let effect = VideoEffect {
+                kind: VideoEffectKind::Mask,
+                start: 0.5,
+                end: 2.5,
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+                mask_style,
+                strength: 1.0,
+                color: 0x3366cc,
+                ..Default::default()
+            };
+            let (output, _, _, _) = export_video(
+                &source,
+                &[VideoSegment {
+                    start: 0.0,
+                    end: 3.0,
+                }],
+                &[effect],
+                VideoExportPreset::Original,
+            )
+            .unwrap();
+            let before = frame_at_with_edge(&output, 0.2, 128);
+            assert!(before.get_pixel(24, 48)[0].abs_diff(before.get_pixel(26, 48)[0]) > 80);
+            let first = frame_at_with_edge(&output, 0.7, 128);
+            let second = frame_at_with_edge(&output, 1.7, 128);
+            if mask_style == VideoMaskStyle::Solid {
+                let actual = first.get_pixel(24, 48);
+                assert!(
+                    actual
+                        .0
+                        .iter()
+                        .zip([51, 102, 204])
+                        .all(|(actual, expected)| actual.abs_diff(expected) < 25),
+                    "custom mask color: {actual:?}"
+                );
+            } else {
+                assert!(
+                    first.get_pixel(24, 48)[0] > 60 && first.get_pixel(24, 48)[1] < 50,
+                    "{mask_style:?} red live frame {:?}",
+                    first.get_pixel(24, 48)
+                );
+                assert!(
+                    second.get_pixel(24, 48)[1] > 60 && second.get_pixel(24, 48)[0] < 50,
+                    "{mask_style:?} green live frame {:?}",
+                    second.get_pixel(24, 48)
+                );
+                assert!(
+                    first.get_pixel(24, 48)[0].abs_diff(first.get_pixel(26, 48)[0]) < 60,
+                    "{mask_style:?} must obscure the source texture"
+                );
+            }
+            assert!(
+                first.get_pixel(104, 48)[0].abs_diff(first.get_pixel(106, 48)[0]) > 80,
+                "{mask_style:?} must not alter pixels outside its rectangle"
+            );
+            let after = frame_at_with_edge(&output, 2.7, 128);
+            assert!(after.get_pixel(24, 48)[2].abs_diff(after.get_pixel(26, 48)[2]) > 80);
+            std::fs::remove_file(output).unwrap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_zoom_eases_into_and_out_of_target_rectangle() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("smooth-zoom.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 128, 96, 30, 2_000_000, false).unwrap();
+        let mut frame = vec![0u8; 128 * 96 * 4];
+        for y in 0..96 {
+            for x in 0..128 {
+                frame[(y * 128 + x) * 4 + if x < 64 { 2 } else { 0 }] = 255;
+                frame[(y * 128 + x) * 4 + 3] = 255;
+            }
+        }
+        for index in 0..90 {
+            assert!(encoder.append_video(&frame, index).unwrap());
+        }
+        encoder.finish().unwrap();
+        // A short interval also tests transition being capped at half its duration.
+        for (start, end, transition, middle, entering, leaving) in [
+            (0.5, 2.5, 0.5, 1.5, 0.75, 2.25),
+            (1.0, 2.0, 2.0, 1.5, 1.25, 1.75),
+        ] {
+            let effect = VideoEffect {
+                kind: VideoEffectKind::Zoom,
+                start,
+                end,
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+                transition,
+                ..Default::default()
+            };
+            let (output, _, _, _) = export_video(
+                &source,
+                &[VideoSegment {
+                    start: 0.0,
+                    end: 3.0,
+                }],
+                &[effect],
+                VideoExportPreset::Original,
+            )
+            .unwrap();
+            let boundary = frame_at_with_edge(&output, start, 128);
+            assert!(
+                boundary.get_pixel(70, 48)[2] > 180,
+                "zoom must begin at the full frame"
+            );
+            for time in [entering, leaving] {
+                let ramp = frame_at_with_edge(&output, time, 128);
+                assert!(
+                    ramp.get_pixel(70, 48)[0] > 180 && ramp.get_pixel(110, 48)[2] > 180,
+                    "zoom must pass through an intermediate rectangle at {time}"
+                );
+            }
+            let peak = frame_at_with_edge(&output, middle, 128);
+            assert!(
+                peak.get_pixel(110, 48)[0] > 180,
+                "zoom must reach its target"
+            );
+            let after = frame_at_with_edge(&output, end, 128);
+            assert!(
+                after.get_pixel(70, 48)[2] > 180,
+                "zoom must return to the full frame"
+            );
+            std::fs::remove_file(output).unwrap();
+        }
     }
 
     fn annotation_png(image: image::RgbaImage) -> String {
@@ -790,6 +1050,11 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     fn frame_at(source: &Path, time: f64) -> image::RgbImage {
+        frame_at_with_edge(source, time, 64)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn frame_at_with_edge(source: &Path, time: f64, edge: u32) -> image::RgbImage {
         let (sample, _, _, _) = export_video(
             source,
             &[VideoSegment {
@@ -800,7 +1065,7 @@ mod tests {
             VideoExportPreset::Original,
         )
         .unwrap();
-        let bytes = crate::macos_media::video_first_frame_png(&sample, 64).unwrap();
+        let bytes = crate::macos_media::video_first_frame_png(&sample, edge).unwrap();
         std::fs::remove_file(sample).unwrap();
         image::load_from_memory(&bytes).unwrap().to_rgb8()
     }
@@ -852,6 +1117,7 @@ mod tests {
                 y: 0.0,
                 width: 0.5,
                 height: 0.5,
+                ..Default::default()
             },
             VideoEffect {
                 kind: VideoEffectKind::Mask,
@@ -861,6 +1127,7 @@ mod tests {
                 y: 0.0,
                 width: 0.25,
                 height: 0.5,
+                ..Default::default()
             },
         ];
         let (output, width, height, duration) =
@@ -1011,6 +1278,7 @@ mod tests {
                 y: 0.0,
                 width: 0.25,
                 height: 0.25,
+                ..Default::default()
             }],
             VideoExportPreset::Original,
         )
@@ -1071,6 +1339,7 @@ mod tests {
                 y: 0.0,
                 width: 0.25,
                 height: 0.5,
+                ..Default::default()
             }],
             VideoExportPreset::Small,
         )

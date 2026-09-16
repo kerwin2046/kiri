@@ -1,0 +1,5 @@
+.kiri-video-export-settings {display:grid;gap:6px;min-width:230px;max-width:330px;flex:1;font:11px var(--kiri-font-ui);}
+.kiri-video-export-settings-title,.kiri-video-export-settings-detail {display:flex;justify-content:space-between;gap:12px;color:var(--kiri-secondary-label);}
+.kiri-video-export-settings-title span:first-child {color:var(--kiri-label);font-weight:550;}
+.kiri-video-export-settings-detail {font-size:10px;font-variant-numeric:tabular-nums;}
+.kiri-video-export-settings .kiri-choice-trigger {width:100%;font-size:12px;}

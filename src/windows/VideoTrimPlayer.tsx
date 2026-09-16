@@ -5,11 +5,13 @@ import { fmt, t } from "../i18n";
 import { deletedRanges, nextPlayableTime, outputTime, splitSegment, timelineDuration, trimSegment, validSegments, videoTimeLabel, type VideoSegment } from "./video-trim.js";
 import { useVideoThumbnails } from "./useVideoThumbnails";
 import { VideoEffectsControls, VideoEffectsOverlay } from "./VideoEffects";
-import type { VideoEffect } from "./video-effects";
+import {videoZoomViewport, type VideoEffect} from "./video-effects";
+import {paintVideoMasks} from "./video-effect-render";
 import "./video-trim.css";
 import {VideoEffectTracks} from "./VideoEffectTracks";
 import {VideoPlaybackControls} from "./VideoPlaybackControls";
 import {VideoTimeInput} from "./VideoTimeInput";
+import {VideoExportSettings} from "./VideoExportSettings";
 
 import type {AnnotationMark} from "../annotation/model";
 import {VideoAnnotationsEditor} from "./VideoAnnotationsEditor";
@@ -28,6 +30,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   const commitAnnotation = useRef<(() => void) | null>(null);
   const registerAnnotationCommit = useCallback((commit:(()=>void)|null)=>{commitAnnotation.current=commit;},[]);
   const previewing = useRef(false);
+  const previewStop = useRef<number|null>(null);
   const dragBase = useRef<EditDocument | null>(null);
   const history = useRef<{ past: EditDocument[]; future: EditDocument[] }>({past:[],future:[]});
   const [doc, setDoc] = useState<EditDocument>({segments:[],effects:[],annotations:[]});
@@ -64,7 +67,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     const player=video.current;
     if(!player || !Number.isFinite(value)) return;
     commitAnnotation.current?.();
-    previewing.current=false; player.pause();
+    previewing.current=false;previewStop.current=null; player.pause();
     const next=Math.max(0,Math.min(duration,value));
     player.currentTime=next; setTime(next);
   },[duration]);
@@ -112,6 +115,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   }
   function playEdit() {
     const player=video.current; if(!player || !valid || busy) return;
+    previewStop.current=null;
     if(!player.paused) {previewing.current=false;player.pause();return;}
     commitAnnotation.current?.();
     setEffectId(null);setAnnotating(false);
@@ -119,8 +123,18 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     player.currentTime=next; previewing.current=true;
     void player.play().catch(()=>{previewing.current=false;});
   }
+  function previewEffect(id:string) {
+    commitAnnotation.current?.();
+    const effect=docRef.current.effects.find(item=>item.id===id),player=video.current;
+    if(!effect||!player||busy)return;
+    setEffectId(null);setAnnotating(false);
+    player.currentTime=Math.max(0,effect.start-.15);
+    previewStop.current=Math.min(duration,effect.end+.15);previewing.current=true;
+    void player.play().catch(()=>{previewing.current=false;previewStop.current=null;});
+  }
   function updatePlayback() {
     const player=video.current; if(!player) return;
+    if(previewStop.current!==null&&player.currentTime>=previewStop.current){player.pause();previewing.current=false;previewStop.current=null;}
     if(previewing.current) {
       const next=nextPlayableTime(docRef.current.segments,player.currentTime);
       if(next==null) {
@@ -153,11 +167,12 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   // Preview compositing mirrors native export: privacy rectangles first, then zoom.
   useEffect(()=>{
     const player=video.current,output=canvas.current;
-    if(!editing || effectId || annotating || !player || !output) return;
+    if(!editing || annotating || !player || !output) return;
     const buffer=document.createElement("canvas");
     const scale=Math.min(1,1280/Math.max(sourceSize.width,sourceSize.height));
     buffer.width=output.width=Math.max(1,Math.round(sourceSize.width*scale));
     buffer.height=output.height=Math.max(1,Math.round(sourceSize.height*scale));
+    const maskScratch=document.createElement("canvas");
     const sourceFrame=document.createElement("canvas");sourceFrame.width=sourceSize.width;sourceFrame.height=sourceSize.height;
     const frameCtx=sourceFrame.getContext("2d");
     const sourceCtx=buffer.getContext("2d"),ctx=output.getContext("2d");
@@ -173,11 +188,14 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
         sourceCtx.save();sourceCtx.scale(buffer.width/sourceSize.width,buffer.height/sourceSize.height);
         renderVideoAnnotations(sourceCtx,sourceFrame,annotations.filter(item=>player.currentTime>=item.start&&player.currentTime<item.end).map(item=>item.mark),sourceSize);
         sourceCtx.restore();
-        sourceCtx.fillStyle="#000";
-        active.filter(e=>e.kind==="mask").forEach(e=>sourceCtx.fillRect(Math.floor(e.x*buffer.width),Math.floor(e.y*buffer.height),Math.ceil((e.x+e.width)*buffer.width)-Math.floor(e.x*buffer.width),Math.ceil((e.y+e.height)*buffer.height)-Math.floor(e.y*buffer.height)));
-        const zoom=active.find(e=>e.kind==="zoom");
+        const masks=[...active];
+        const selectedEffect=effects.find(item=>item.id===effectId);
+        if(selectedEffect?.kind==="mask"&&!masks.includes(selectedEffect))masks.push(selectedEffect);
+        paintVideoMasks(sourceCtx,masks,maskScratch);
+        const zoom=effectId?null:active.find(e=>e.kind==="zoom");
+        const viewport=zoom?videoZoomViewport(zoom,player.currentTime):null;
         ctx.clearRect(0,0,output.width,output.height);
-        if(zoom) ctx.drawImage(buffer,zoom.x*buffer.width,zoom.y*buffer.height,zoom.width*buffer.width,zoom.height*buffer.height,0,0,output.width,output.height);
+        if(viewport) ctx.drawImage(buffer,viewport.x*buffer.width,viewport.y*buffer.height,viewport.width*buffer.width,viewport.height*buffer.height,0,0,output.width,output.height);
         else ctx.drawImage(buffer,0,0);
       }
       if(!player.paused) frame=requestAnimationFrame(draw);
@@ -191,7 +209,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     if(!editing||annotating) return;
     const onKey=(event:KeyboardEvent)=>{
       const target=event.target as HTMLElement;
-      if(target.closest("input,select,textarea,[contenteditable=true]")) return;
+      if(target.closest("input,select,textarea,[contenteditable=true],[role=listbox]")) return;
       if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="z") {event.preventDefault();undo(event.shiftKey);}
       else if(event.code==="Space" && !target.closest("button")) {event.preventDefault();playEdit();}
       else if(event.key.toLowerCase()==="s" && !event.metaKey && !event.ctrlKey) {event.preventDefault();split();}
@@ -292,7 +310,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       <div ref={stage} className="kiri-video-stage">
         <div className="kiri-video-surface" style={{width:fitted.width,height:fitted.height}}>
           <video ref={video} src={props.src} crossOrigin="anonymous" controls={false} playsInline autoPlay preload="metadata"
-            style={{visibility:editing&&!effectId?"hidden":"visible"}}
+            style={{visibility:editing?"hidden":"visible"}}
             onLoadedMetadata={event=>{
               const player=event.currentTarget,value=player.duration;
               const d=Number.isFinite(value)?value:0;setDuration(d);
@@ -302,7 +320,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
             onTimeUpdate={updatePlayback} onSeeked={updatePlayback}
             onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{previewing.current=false;setPlaying(false);}}
             onError={props.onError} />
-          {editing && !effectId && !annotating && <canvas ref={canvas} className="kiri-video-effect-preview" aria-label={t("Edited video preview")} />}
+          {editing && !annotating && <canvas ref={canvas} className="kiri-video-effect-preview" aria-label={t("Edited video preview")} />}
           {editing&&annotating&&<div className="kiri-video-annotation-editor"><VideoAnnotationsEditor onCommitReady={registerAnnotationCommit} toolbarHost={annotationToolbar} image={sourceImage} sourceSize={sourceSize} viewSize={fitted} marks={visibleAnnotations.map(item=>item.mark)} revision={annotationRevision} selectedMarkId={selectedAnnotation?.mark.id??null} onSelectionChange={markId=>setAnnotationId(markId===null?null:docRef.current.annotations.find(item=>item.mark.id===markId)?.id??null)} disabled={busy} onChange={changeAnnotationMarks} onUndo={()=>undo()} onRedo={()=>undo(true)} canUndo={!!history.current.past.length} canRedo={!!history.current.future.length} onClose={()=>setAnnotating(false)}/></div>}
           {editing && effectId && <VideoEffectsOverlay effects={effects} onChange={(next,transient)=>apply({...docRef.current,effects:next},transient)} selectedId={effectId} onSelect={setEffectId} time={time} duration={duration} disabled={busy} />}
         </div>
@@ -315,7 +333,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
           const current=docRef.current,selected=current.annotations.find(item=>item.id===selectedAnnotation.id);if(!selected)return;
           const next={...selected,[edge]:value};if(!Number.isFinite(value)||next.start<0||next.end>duration||next.end-next.start<.05-1e-9)return;apply({...current,annotations:current.annotations.map(item=>item.id===next.id?next:item)});setAnnotationRevision(v=>v+1);
         }}/></label>)}<button type="button" className="kiri-button kiri-button--secondary" disabled={busy} onClick={()=>{commitAnnotation.current?.();apply({...docRef.current,annotations:docRef.current.annotations.filter(item=>item.id!==selectedAnnotation.id)});setAnnotationId(null);setAnnotationRevision(v=>v+1);}}><Trash2 size={14}/>{t("Delete annotation")}</button></>}
-        </section>:<VideoEffectsControls effects={effects} onChange={(next,transient)=>apply({...docRef.current,effects:next},transient)} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
+        </section>:<VideoEffectsControls onPreview={previewEffect} effects={effects} onChange={(next,transient)=>apply({...docRef.current,effects:next},transient)} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
     </div>
     {!editing&&<VideoPlaybackControls video={video}/>}
     {editing&&<section className="kiri-video-timeline" aria-label={t("Video timeline")}>
@@ -360,7 +378,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       </div>
       <footer className="kiri-video-export-footer">
         <div className="kiri-video-export-status" role={error?"alert":"status"}>{busy?t("Saving a new video to your library…"):error?t("Couldn't export the video. Check library access and free disk space, then retry."):savedId?<>{t("Copy saved to library")}<button type="button" className="kiri-button kiri-button--secondary" onClick={()=>void api.openAsset(savedId).catch(()=>setError(true))}>{t("Open")}</button></>:t("Click to seek. Drag clip edges to trim. Split to remove a middle section.")}</div>
-        <label className="kiri-video-quality"><span>{t("Export quality")}</span><select disabled={busy} value={preset} onChange={e=>{setPreset(e.target.value as typeof preset);setSavedId(null);}}><option value="original">{t("High quality")}</option><option value="share">{t("Share · 1080 px max edge")}</option><option value="small">{t("Small file · 720 px max edge")}</option></select></label>
+        <VideoExportSettings preset={preset} onChange={next=>{setPreset(next);setSavedId(null);}} sourceSize={sourceSize} outputDuration={total} disabled={busy}/>
         <button type="button" className="kiri-button kiri-button--primary" disabled={!valid||busy} onClick={()=>void saveCopy()}>{t(busy?"Exporting…":"Save a Copy")}</button>
       </footer>
     </section>}

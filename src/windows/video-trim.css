@@ -105,3 +105,6 @@
 .kiri-video-annotation-inspector input {color:var(--kiri-label);background:var(--kiri-group-fill);border:1px solid var(--kiri-surface-border);padding:6px;border-radius:5px;}
 
 .kiri-video-annotation-toolbar-host {flex:none;position:relative;min-height:44px;background:var(--kiri-card);border-bottom:1px solid var(--kiri-surface-border);}
+
+.kiri-video-effect-envelope {position:absolute;inset:2px 6px;width:calc(100% - 12px);height:calc(100% - 4px);pointer-events:none;fill:none;stroke:#ffffff42;stroke-width:1;vector-effect:non-scaling-stroke;}
+.kiri-video-effect-bar-body>span {position:relative;z-index:1;}

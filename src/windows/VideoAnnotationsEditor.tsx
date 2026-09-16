@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {createPortal} from "react-dom";
+import {ChoiceSelect} from "../components/ChoiceSelect";
 import AnnotationCanvas, {type AnnotationCanvasHandle} from "../annotation/AnnotationCanvas";
 import {COLOR_HEX,COLOR_LABELS,COLOR_PRESETS,DEFAULT_APPEARANCE,type AnnotationMark,type Tool,type AppearanceSettings} from "../annotation/model";
 import {KiriIcon,type IconName} from "../components/KiriIcons";
@@ -36,6 +37,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
       if(props.disabled||event.defaultPrevented) return;
+      if(event.target instanceof HTMLElement && event.target.closest("[role=listbox]")) return;
       if(event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
       if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="z") {event.preventDefault();event.stopImmediatePropagation();event.shiftKey?canvas.current?.redo():canvas.current?.undo();return;}
       if(event.metaKey||event.ctrlKey||event.altKey) return;
@@ -58,8 +60,8 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
           onPointerDown={()=>{if(tool==="text")canvas.current?.beginTextFontSizeAdjustment();}}
           onPointerUp={()=>canvas.current?.endTextFontSizeAdjustment()} onPointerCancel={()=>canvas.current?.endTextFontSizeAdjustment()} onBlur={()=>canvas.current?.endTextFontSizeAdjustment()}
           onChange={event=>{const value=Number(event.target.value);setAppearance({...appearance,[sizeKey]:value});if(tool==="text")canvas.current?.setTextFontSizeLive(value*scale);}}/>{appearance[sizeKey]}</label>
-        {tool==="text"&&<select aria-label={t("Text background")} value={appearance.textBackgroundStyle} onChange={event=>setAppearance({...appearance,textBackgroundStyle:event.target.value as AppearanceSettings["textBackgroundStyle"]})}><option value="transparent">{t("Transparent")}</option><option value="dark">{t("Dark")}</option></select>}
-        {tool==="mosaic"?<><select aria-label={t("Mosaic")} value={appearance.mosaicStyle} onChange={event=>setAppearance({...appearance,mosaicStyle:event.target.value as AppearanceSettings["mosaicStyle"]})}><option value="pixel">{t("Pixel")}</option><option value="blur">{t("Blur")}</option></select><select aria-label={t("Intensity")} value={appearance.mosaicIntensity} onChange={event=>setAppearance({...appearance,mosaicIntensity:event.target.value as AppearanceSettings["mosaicIntensity"]})}><option value="soft">{t("Soft")}</option><option value="standard">{t("Standard")}</option><option value="strong">{t("Strong")}</option></select></>:COLOR_PRESETS.map(color=><button type="button" className="kiri-video-annotation-swatch" key={color} style={{background:COLOR_HEX[color]}} title={t(COLOR_LABELS[color])} aria-label={t(COLOR_LABELS[color])} aria-pressed={appearance.colorPreset===color} onClick={()=>setAppearance({...appearance,colorPreset:color})}/>)}
+        {tool==="text"&&<ChoiceSelect label={t("Text background")} disabled={props.disabled} value={appearance.textBackgroundStyle} onChange={textBackgroundStyle=>setAppearance({...appearance,textBackgroundStyle})} options={[{value:"transparent",label:t("Transparent"),description:t("No background")},{value:"dark",label:t("Dark"),description:t("Dark background")}]} />}
+        {tool==="mosaic"?<><ChoiceSelect label={t("Mosaic")} disabled={props.disabled} value={appearance.mosaicStyle} onChange={mosaicStyle=>setAppearance({...appearance,mosaicStyle})} options={[{value:"pixel",label:t("Pixel"),description:t("Pixel mosaic")},{value:"blur",label:t("Blur"),description:t("Gaussian blur")}]} /><ChoiceSelect label={t("Intensity")} disabled={props.disabled} value={appearance.mosaicIntensity} onChange={mosaicIntensity=>setAppearance({...appearance,mosaicIntensity})} options={[{value:"soft",label:t("Soft")},{value:"standard",label:t("Standard")},{value:"strong",label:t("Strong")}]} /></>:COLOR_PRESETS.map(color=><button type="button" className="kiri-video-annotation-swatch" key={color} style={{background:COLOR_HEX[color]}} title={t(COLOR_LABELS[color])} aria-label={t(COLOR_LABELS[color])} aria-pressed={appearance.colorPreset===color} onClick={()=>setAppearance({...appearance,colorPreset:color})}/>)}
       </div>}
     </fieldset>;
   return <div className="kiri-video-annotations-editor">
