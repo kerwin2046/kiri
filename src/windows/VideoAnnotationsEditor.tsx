@@ -8,7 +8,7 @@ import "./VideoAnnotationsEditor.css";
 
 export type VideoAnnotationsEditorProps={
   image:HTMLImageElement|null;sourceSize:{width:number;height:number};viewSize:{width:number;height:number};
-  marks:AnnotationMark[];revision:number;toolbarHost?:HTMLElement|null;selectedMarkId?:number;disabled:boolean;
+  marks:AnnotationMark[];revision:number;toolbarHost?:HTMLElement|null;selectedMarkId?:number|null;onSelectionChange?(markId:number|null):void;disabled:boolean;
   onCommitReady?(commit:(()=>void)|null):void;
   onChange(marks:AnnotationMark[]):void;onUndo():void;onRedo():void;canUndo:boolean;canRedo:boolean;onClose():void;
 };
@@ -52,7 +52,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
       <span className="kiri-video-annotation-divider"/>
       <button type="button" className="kiri-video-annotation-tool" title={t("Undo (⌘Z)")} aria-label={t("Undo (⌘Z)")} disabled={!props.canUndo} onClick={()=>canvas.current?.undo()}><KiriIcon name="arrow.uturn.backward" size={17}/></button>
       <button type="button" className="kiri-video-annotation-tool" title={t("Redo (⇧⌘Z)")} aria-label={t("Redo (⇧⌘Z)")} disabled={!props.canRedo} onClick={()=>canvas.current?.redo()}><KiriIcon name="arrow.uturn.forward" size={17}/></button>
-      <button type="button" className="kiri-button kiri-button--secondary" onClick={()=>{canvas.current?.commitTextEditing();props.onClose();}}>{t("Done")}</button>
+      <button type="button" className="kiri-button kiri-button--secondary" onClick={()=>{canvas.current?.commitTextEditing();props.onClose();}}>{t("Finish")}</button>
       {tool!=="select"&&<div className="kiri-video-annotation-appearance">
         <label>{t(tool==="text"?"Font":tool==="mosaic"||tool==="pen"?"Brush":"Line")}<input className="kiri-range" type="range" min={tool==="text"||tool==="mosaic"?12:1} max={tool==="text"?64:tool==="mosaic"?120:24} value={appearance[sizeKey]}
           onPointerDown={()=>{if(tool==="text")canvas.current?.beginTextFontSizeAdjustment();}}
@@ -66,7 +66,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
     {props.toolbarHost?createPortal(toolbar,props.toolbarHost):toolbar}
     <div className="kiri-video-annotation-surface" style={{width:props.viewSize.width,height:props.viewSize.height}}>
       <AnnotationCanvas ref={canvas} image={props.image} region={{x:0,y:0,...props.sourceSize}} viewSize={props.viewSize}
-        initialDocument={{schemaVersion:1,canvas:props.sourceSize,sourcePixels:props.sourceSize,marks:props.marks}} documentRevision={props.revision} selectedMarkId={props.selectedMarkId}
+        initialDocument={{schemaVersion:1,canvas:props.sourceSize,sourcePixels:props.sourceSize,marks:props.marks}} documentRevision={props.revision} selectedMarkId={props.selectedMarkId} onSelectionChange={props.onSelectionChange}
         interactionDisabled={props.disabled} tool={tool} appearance={scaled} onHistoryChange={noop} onDocumentChange={props.onChange} onUndo={props.onUndo} onRedo={props.onRedo} onCancel={props.onClose}/>
     </div>
   </div>;

@@ -587,7 +587,17 @@ mod tests {
                     } else {
                         0
                     };
-                    frame[(y * 64 + x) * 4 + channel] = if x % 4 < 2 { 255 } else { 90 };
+                    // Keep high-frequency stripes inside the mosaic region only. The
+                    // transparency/orientation probes use the flat right half: otherwise
+                    // repeated H.264 chroma subsampling creates red in bright green stripes,
+                    // confounding an alpha-compositing assertion with codec reconstruction.
+                    frame[(y * 64 + x) * 4 + channel] = if x >= 32 {
+                        180
+                    } else if x % 4 < 2 {
+                        255
+                    } else {
+                        90
+                    };
                     frame[(y * 64 + x) * 4 + 3] = 255;
                 }
             }
@@ -661,9 +671,35 @@ mod tests {
                 yellow[0] > 180 && yellow[1] > 180 && yellow[2] < 45,
                 "timed overlay missing: {yellow:?}"
             );
+            let transparent = second.get_pixel(48, 20);
+            // Keep the comparison on the same CI/encoding/color path so this checks
+            // alpha independently of legacy untagged-source color interpretation.
+            let mut transparent_annotations = annotations.clone();
+            transparent_annotations[1].image_base64 = annotation_png(image::RgbaImage::new(32, 24));
+            let (control_output, _, _, _) = export_video_with_annotations(
+                &source,
+                &[VideoSegment {
+                    start: 0.0,
+                    end: 3.0,
+                }],
+                &[],
+                &transparent_annotations,
+                VideoExportPreset::Original,
+            )
+            .unwrap();
+            let control = frame_at(&control_output, 1.2);
+            std::fs::remove_file(control_output).unwrap();
+            let control = control.get_pixel(48, 20);
+            eprintln!(
+                "{kind:?} transparent={transparent:?}, control={control:?}, opaque={yellow:?}"
+            );
             assert!(
-                second.get_pixel(48, 20)[0] < 45,
-                "transparent lower overlay half must retain source"
+                transparent[0] < 45 && transparent[1] > 130 && transparent[2] < 45,
+                "{kind:?} transparent lower overlay half must retain green source: actual={transparent:?}, control={control:?}, opaque={yellow:?}"
+            );
+            assert!(
+                transparent.0.iter().zip(control.0).all(|(actual, expected)| actual.abs_diff(expected) <= 20),
+                "{kind:?} transparent region must match source across all channels: actual={transparent:?}, control={control:?}, opaque={yellow:?}"
             );
             let after = frame_at(&output, 2.7);
             assert!(after.get_pixel(8, 24)[2].abs_diff(after.get_pixel(10, 24)[2]) > 80);
@@ -671,6 +707,83 @@ mod tests {
                 after.get_pixel(48, 4)[0] < 45,
                 "overlay must end independently"
             );
+            std::fs::remove_file(output).unwrap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_sdr_color_metadata_preserves_small_and_hd_recordings_through_ci() {
+        use crate::macos_media::MacosSegmentEncoder;
+        for (width, height) in [(64usize, 48usize), (1280, 720)] {
+            let directory = tempfile::tempdir().unwrap();
+            let source = directory.path().join("color-tagged.mp4");
+            let mut encoder = MacosSegmentEncoder::new(
+                &source,
+                width as u32,
+                height as u32,
+                30,
+                2_000_000,
+                false,
+            )
+            .unwrap();
+            let mut frame = vec![0u8; width * height * 4];
+            for y in 0..height {
+                for x in 0..width {
+                    let channel = (x * 3 / width).min(2);
+                    frame[(y * width + x) * 4 + channel] = 180;
+                    frame[(y * width + x) * 4 + 3] = 255;
+                }
+            }
+            for index in 0..6 {
+                assert!(encoder.append_video(&frame, index).unwrap());
+            }
+            encoder.finish().unwrap();
+            let source_bytes = std::fs::read(&source).unwrap();
+            let color = source_bytes
+                .windows(4)
+                .position(|value| value == b"nclx" || value == b"nclc")
+                .expect("recording must carry an explicit color description");
+            assert_eq!(
+                &source_bytes[color + 4..color + 10],
+                &[0, 1, 0, 1, 0, 1],
+                "recording must tag BT.709 primaries, transfer and YCbCr matrix"
+            );
+            let annotation = VideoAnnotation {
+                start: 0.0,
+                end: 0.2,
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+                kind: VideoAnnotationKind::Overlay,
+                amount: 0.0,
+                image_base64: annotation_png(image::RgbaImage::new(1, 1)),
+            };
+            let (output, _, _, _) = export_video_with_annotations(
+                &source,
+                &[VideoSegment {
+                    start: 0.0,
+                    end: 0.2,
+                }],
+                &[],
+                &[annotation],
+                VideoExportPreset::Original,
+            )
+            .unwrap();
+            let source_png =
+                crate::macos_media::video_first_frame_png(&source, width as u32).unwrap();
+            let output_png =
+                crate::macos_media::video_first_frame_png(&output, width as u32).unwrap();
+            let before = image::load_from_memory(&source_png).unwrap().to_rgb8();
+            let after = image::load_from_memory(&output_png).unwrap().to_rgb8();
+            for part in 0..3 {
+                let x = ((part * 2 + 1) * width / 6) as u32;
+                let y = (height / 2) as u32;
+                let expected = before.get_pixel(x, y);
+                let actual = after.get_pixel(x, y);
+                assert!(expected.0.iter().zip(actual.0).all(|(expected, actual)| expected.abs_diff(actual) <= 8), "{width}x{height} channel {part}: source={expected:?}, transparent export={actual:?}");
+            }
             std::fs::remove_file(output).unwrap();
         }
     }

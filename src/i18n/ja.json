@@ -449,5 +449,10 @@
   "Delete annotation": "注釈を削除",
   "Annotations": "注釈",
   "Text background": "文字の背景",
-  "Intensity": "強さ"
+  "Intensity": "強さ",
+  "Pen": "ペン",
+  "Rectangle": "長方形",
+  "Arrow": "矢印",
+  "Text": "テキスト",
+  "Mosaic": "モザイク"
 }

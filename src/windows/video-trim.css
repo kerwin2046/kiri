@@ -4,12 +4,12 @@
 .kiri-video-editor-heading strong {font-size:14px; font-weight:650; white-space:nowrap;}
 .kiri-video-editor-heading span {color:var(--kiri-secondary-label); font-size:11px;}
 .kiri-video-workspace { display:flex; flex:1; min-height:0; overflow:hidden; }
-.kiri-video-stage { position:relative; flex:1; min-width:0; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.kiri-video-stage { position:relative; flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; }
 .kiri-video-player--editing .kiri-video-stage {margin:18px 20px 28px;}
 .kiri-video-surface {position:relative; flex:none;}
 .kiri-video-surface video { display:block; width:100%; height:100%; object-fit:contain; }
 .kiri-video-effect-preview {position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
-.kiri-video-view-label {position:absolute;bottom:2px;left:0;color:var(--kiri-secondary-label);font-size:10px;}
+.kiri-video-view-label {align-self:flex-start;flex:none;height:16px;line-height:16px;margin-top:8px;color:var(--kiri-secondary-label);font-size:10px;}
 .kiri-video-inspector { flex:0 0 232px; padding:16px; overflow:auto; border-left:1px solid var(--kiri-surface-border); background:var(--kiri-card); }
 .kiri-video-inspector .kiri-video-effects {border:0;margin:0;padding:0;}
 .kiri-video-inspector .kiri-video-effects-actions {display:grid;grid-template-columns:1fr;gap:8px;}

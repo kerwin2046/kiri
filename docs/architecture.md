@@ -212,7 +212,10 @@ separate from overlay completion and does not cancel another capture session.
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses
 ScreenCaptureKit and sends those buffers to AVAssetWriter for a 30 fps H.264
-MP4 with optional AAC audio. Windows uses Windows Graphics Capture plus WASAPI
+MP4 with optional AAC audio and explicit BT.709 color metadata, keeping playback
+and Core Image export consistent at both small and HD dimensions. Legacy videos
+without color tags still depend on platform color-space inference.
+Windows uses Windows Graphics Capture plus WASAPI
 through `cpal`, then sends the buffers to Media Foundation. Neither platform
 resolves, downloads, or launches an external media encoder.
 

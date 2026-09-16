@@ -101,6 +101,14 @@ void *kiri_macos_encoder_create(
                 AVVideoCodecKey: AVVideoCodecTypeH264,
                 AVVideoWidthKey: @(width),
                 AVVideoHeightKey: @(height),
+                // Match the native compositor's SDR output explicitly. Untagged H.264
+                // is interpreted as different color spaces by playback and CI export,
+                // especially at small dimensions, which changes colors after editing.
+                AVVideoColorPropertiesKey: @{
+                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+                },
                 AVVideoCompressionPropertiesKey: compression,
             };
             AVAssetWriterInput *videoInput = [AVAssetWriterInput

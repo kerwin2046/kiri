@@ -449,5 +449,10 @@
   "Delete annotation": "删除标注",
   "Annotations": "标注",
   "Text background": "文字背景",
-  "Intensity": "强度"
+  "Intensity": "强度",
+  "Pen": "画笔",
+  "Rectangle": "矩形",
+  "Arrow": "箭头",
+  "Text": "文字",
+  "Mosaic": "马赛克"
 }

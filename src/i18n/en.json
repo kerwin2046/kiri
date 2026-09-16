@@ -449,5 +449,10 @@
   "Delete annotation": "Delete annotation",
   "Annotations": "Annotations",
   "Text background": "Text background",
-  "Intensity": "Intensity"
+  "Intensity": "Intensity",
+  "Pen": "Pen",
+  "Rectangle": "Rectangle",
+  "Arrow": "Arrow",
+  "Text": "Text",
+  "Mosaic": "Mosaic"
 }

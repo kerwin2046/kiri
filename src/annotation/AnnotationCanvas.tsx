@@ -74,7 +74,8 @@ interface Props {
   initialDocument?: AnnotationDocumentV1;
   /** Video editors can reload an externally owned history without remounting. */
   documentRevision?: number;
-  selectedMarkId?: number;
+  selectedMarkId?: number | null;
+  onSelectionChange?(markId: number | null): void;
   onDocumentChange?(marks: AnnotationMark[]): void;
   onUndo?(): void;
   onRedo?(): void;
@@ -122,6 +123,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       initialDocument,
       documentRevision,
       selectedMarkId,
+      onSelectionChange,
       onDocumentChange,
       onUndo,
       onRedo,
@@ -153,6 +155,14 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       history.elements.slice(),
     );
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+    const selectionChangeRef = useRef(onSelectionChange);
+    selectionChangeRef.current = onSelectionChange;
+    // Publish only user selection changes. External revision reloads use the
+    // raw state setter, so their temporary reset cannot clear the parent track.
+    const selectMark = useCallback((index: number | null) => {
+      setSelectedIndex(index);
+      selectionChangeRef.current?.(index === null ? null : history.elements[index]?.id ?? null);
+    }, [history]);
     const [draft, setDraft] = useState<AnnotationMark | null>(null);
     const [brushCursor, setBrushCursor] = useState<Point | null>(null);
     const [selectCursor, setSelectCursor] = useState<string>("default");
@@ -359,7 +369,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       if (text === null) {
         if (current.index !== null) {
           history.remove(current.index);
-          setSelectedIndex(null);
+          selectMark(null);
           syncMarks();
         }
         return;
@@ -393,7 +403,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           history.replace(current.index, newMark);
           syncMarks();
         }
-        setSelectedIndex(current.index);
+        selectMark(current.index);
       } else {
         history.append(newMark);
         syncMarks();
@@ -457,7 +467,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           };
           editingRef.current = nextEditing;
           setEditing(nextEditing);
-          setSelectedIndex(null);
+          selectMark(null);
           publishHistory();
           return;
         }
@@ -491,7 +501,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             ? selectedIndex
             : markIndexAt(current, p, hitTestScale);
           if (index === null || index === undefined) {
-            setSelectedIndex(null);
+            selectMark(null);
             interactionRef.current = { kind: "none" };
             redraw();
             return;
@@ -522,11 +532,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             };
             editingRef.current = nextEditing;
             setEditing(nextEditing);
-            setSelectedIndex(index);
+            selectMark(index);
             publishHistory();
             return;
           }
-          setSelectedIndex(index);
+          selectMark(index);
           if (handleInteraction === "start" || handleInteraction === "end") {
             interactionRef.current = {
               kind: "endpoint",
@@ -826,7 +836,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         if (e.key === "Delete" || e.key === "Backspace") {
           if (toolRef.current === "select" && selectedIndexRef.current !== null) {
             history.remove(selectedIndexRef.current);
-            setSelectedIndex(null);
+            selectMark(null);
             syncMarks();
           }
         }
@@ -848,7 +858,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       commitText();
       if (onUndo) { onUndo(); return; }
       history.undo();
-      setSelectedIndex(null);
+      selectMark(null);
       syncMarks();
     };
     redoRef.current = () => {
@@ -856,14 +866,14 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       commitText();
       if (onRedo) { onRedo(); return; }
       history.redo();
-      setSelectedIndex(null);
+      selectMark(null);
       syncMarks();
     };
     deleteRef.current = () => {
       if (interactionsDisabled()) return;
       if (toolRef.current !== "select" || selectedIndexRef.current === null) return;
       history.remove(selectedIndexRef.current);
-      setSelectedIndex(null);
+      selectMark(null);
       syncMarks();
     };
 
@@ -1041,7 +1051,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           editingRef.current = null;
           setEditing(null);
           history.clear();
-          setSelectedIndex(null);
+          selectMark(null);
           syncMarks();
         },
         deleteSelection: () => deleteRef.current(),

@@ -143,7 +143,8 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     const element=stage.current; if(!element) return;
     const observer=new ResizeObserver(()=>{
       const rect=element.getBoundingClientRect();
-      const scale=Math.min(rect.width/sourceSize.width,rect.height/sourceSize.height);
+      const availableHeight=Math.max(1,rect.height-(editing?32:0));
+      const scale=Math.min(rect.width/sourceSize.width,availableHeight/sourceSize.height);
       setFitted({width:Math.max(1,sourceSize.width*scale),height:Math.max(1,sourceSize.height*scale)});
     });
     observer.observe(element); return()=>observer.disconnect();
@@ -302,7 +303,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
             onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{previewing.current=false;setPlaying(false);}}
             onError={props.onError} />
           {editing && !effectId && !annotating && <canvas ref={canvas} className="kiri-video-effect-preview" aria-label={t("Edited video preview")} />}
-          {editing&&annotating&&<div className="kiri-video-annotation-editor"><VideoAnnotationsEditor onCommitReady={registerAnnotationCommit} toolbarHost={annotationToolbar} image={sourceImage} sourceSize={sourceSize} viewSize={fitted} marks={visibleAnnotations.map(item=>item.mark)} revision={annotationRevision} selectedMarkId={selectedAnnotation?.mark.id} disabled={busy} onChange={changeAnnotationMarks} onUndo={()=>undo()} onRedo={()=>undo(true)} canUndo={!!history.current.past.length} canRedo={!!history.current.future.length} onClose={()=>setAnnotating(false)}/></div>}
+          {editing&&annotating&&<div className="kiri-video-annotation-editor"><VideoAnnotationsEditor onCommitReady={registerAnnotationCommit} toolbarHost={annotationToolbar} image={sourceImage} sourceSize={sourceSize} viewSize={fitted} marks={visibleAnnotations.map(item=>item.mark)} revision={annotationRevision} selectedMarkId={selectedAnnotation?.mark.id??null} onSelectionChange={markId=>setAnnotationId(markId===null?null:docRef.current.annotations.find(item=>item.mark.id===markId)?.id??null)} disabled={busy} onChange={changeAnnotationMarks} onUndo={()=>undo()} onRedo={()=>undo(true)} canUndo={!!history.current.past.length} canRedo={!!history.current.future.length} onClose={()=>setAnnotating(false)}/></div>}
           {editing && effectId && <VideoEffectsOverlay effects={effects} onChange={(next,transient)=>apply({...docRef.current,effects:next},transient)} selectedId={effectId} onSelect={setEffectId} time={time} duration={duration} disabled={busy} />}
         </div>
         {editing && <span className="kiri-video-view-label">{t(effectId||annotating?"Position the effect on the original frame":"Edited preview")}</span>}
