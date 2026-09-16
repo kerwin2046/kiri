@@ -8,6 +8,8 @@ mod commands;
 mod core;
 mod diagnostics;
 mod gif;
+mod video_export;
+mod microphone;
 #[cfg(target_os = "macos")]
 mod macos_media;
 mod ocr;
@@ -177,6 +179,7 @@ pub fn run() {
             commands::open_editor,
             commands::reveal_asset,
             commands::convert_to_gif,
+            commands::export_video_copy,
             commands::start_capture,
             commands::cancel_capture,
             commands::prepare_capture_annotation,
@@ -209,6 +212,8 @@ pub fn run() {
             commands::stop_recording,
             commands::show_confirm_dialog,
             commands::mic_supported,
+            microphone::microphone_check,
+            microphone::stop_microphone_check,
             commands::log_frontend_error,
             commands::get_locale,
             commands::get_language,

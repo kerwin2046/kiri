@@ -1120,6 +1120,78 @@ fn recovery_asset_state(
     }
 }
 
+// One native export at a time bounds encoder and temporary-disk pressure.
+static VIDEO_EXPORT_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct VideoExportPermit;
+impl Drop for VideoExportPermit {
+    fn drop(&mut self) {
+        VIDEO_EXPORT_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[tauri::command]
+pub async fn export_video_copy(
+    app: AppHandle,
+    window: WebviewWindow,
+    id: String,
+    segments: Vec<crate::video_export::VideoSegment>,
+    effects: Vec<crate::video_export::VideoEffect>,
+    preset: crate::video_export::VideoExportPreset,
+) -> Result<String, String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    if window.label() != format!("viewer-{parsed}") {
+        return Err("Video export requires its own viewer.".into());
+    }
+    if segments.is_empty() || segments.len() > 128 || effects.len() > 128 {
+        return Err("Invalid video edit size.".into());
+    }
+    VIDEO_EXPORT_BUSY.compare_exchange(false, true,
+        std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire)
+        .map_err(|_| "Another video is being exported.".to_string())?;
+    let permit = VideoExportPermit;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        let mut snapshot = tempfile::Builder::new().prefix("kiri-export-source-")
+            .suffix(".mp4").tempfile().map_err(|e| e.to_string())?;
+        let state = app.state::<AppState>();
+        // Open under the library lock, then copy from the stable file handle
+        // outside it. A large video on an external disk must not block UI commands.
+        let (asset, mut source, library_id, generation) = {
+            let mut context = state.library.lock().unwrap();
+            let library_id = context.expected_library_id();
+            let generation = context.expected_library_generation();
+            let library = context.library().map_err(|e| e.to_string())?;
+            let asset = library.asset_by_id(&parsed).cloned()
+                .ok_or_else(|| "The capture could not be found.".to_string())?;
+            if asset.kind != CaptureKind::Video || asset.trashed_at.is_some() {
+                return Err("Only active video captures can be exported.".into());
+            }
+            let source = library.readable_asset_url(&asset).map_err(|e| e.to_string())?;
+            let source = std::fs::File::open(source).map_err(|e| e.to_string())?;
+            (asset, source, library_id, generation)
+        };
+        std::io::copy(&mut source, snapshot.as_file_mut()).map_err(|e| e.to_string())?;
+        drop(source);
+        let (path, width, height, duration) = crate::video_export::export_video(
+            snapshot.path(), &segments, &effects, preset).map_err(|e| e.to_string())?;
+        // RAII also removes the finished temporary export on import failure.
+        let output = tempfile::TempPath::try_from_path(path).map_err(|e| e.to_string())?;
+        let exported = {
+            let mut context = state.library.lock().unwrap();
+            if context.expected_library_id() != library_id
+                || context.expected_library_generation() != generation {
+                return Err("The library changed during export. Please retry.".into());
+            }
+            context.library_mut().map_err(|e| e.to_string())?
+                .import_file(&output, CaptureKind::Video, "mp4", width, height,
+                    Some(duration), asset.source_application.clone())
+                .map_err(|e| e.to_string())?
+        };
+        emit_library_changed(&app);
+        Ok(exported.id.to_string())
+    }).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn convert_to_gif(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
@@ -1604,6 +1676,7 @@ pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
             None => return Err("Capture command is only available to its overlay.".into()),
         }
     };
+    crate::microphone::stop();
     let Some(session) = session else {
         log::info!("cancel_capture: no active session; closing orphan overlay");
         let _ = window.close();
@@ -2692,6 +2765,7 @@ pub async fn start_recording_flow(
         context.library().map_err(|error| error.to_string())?;
     }
 
+    crate::microphone::stop();
     let saved_options = request.options.normalized();
     let mut options = saved_options;
     if options.output_format == RecordingOutputFormat::Gif {

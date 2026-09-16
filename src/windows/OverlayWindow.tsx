@@ -13,6 +13,7 @@ import {
   type RecordingOptions,
 } from "../lib/ipc";
 import { t } from "../i18n";
+import MicrophoneCheck from "./MicrophoneCheck";
 import type { Point, Rect } from "../annotation/geom";
 import {
   ALL_HANDLES,
@@ -1498,7 +1499,7 @@ function RecordOptionsPanel(props: {
   // below the selection, flip above when needed, and pin inside the screen as
   // a last resort. Keep x centered on the selection with an 8pt margin.
   const PANEL_W = 360;
-  const PANEL_H = gifOutput ? 314 : 382;
+  const PANEL_H = gifOutput ? 314 : options.capturesMicrophone && micSupported ? 456 : 382;
   const margin = 8;
   const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
   const centeredTop = Math.max(margin, Math.min(maxTop, bounds.height / 2 - PANEL_H / 2 + 30));
@@ -1625,6 +1626,7 @@ function RecordOptionsPanel(props: {
               onToggle={() => toggle("capturesMicrophone")}
               disabled={!micSupported}
             />
+            {options.capturesMicrophone && micSupported && <MicrophoneCheck />}
           </>
         )}
         <ToggleRow

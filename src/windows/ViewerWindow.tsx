@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, mediaUrl, onAssetContentChanged, type AssetAvailability } from "../lib/ipc";
+import { VideoTrimPlayer } from "./VideoTrimPlayer";
 import { OcrDialog } from "../ocr/TextHistory";
 import { t } from "../i18n";
 import { KiriIcon } from "../components/KiriIcons";
@@ -244,14 +245,12 @@ export function ViewerWindow(props: { id: string }) {
           }
         />
       ) : mediaKind === "video" ? (
-        <video
+        <VideoTrimPlayer
           key={`${props.id}:${mediaRevision}`}
+          id={props.id}
           src={mediaUrl(props.id)}
-          controls
-          autoPlay
-          preload="metadata"
+          editable={state.kind === "ready" && !state.asset.trashedAt}
           onError={() => void handleMediaError()}
-          style={{ maxWidth: "100%", maxHeight: "100%" }}
         />
       ) : mediaKind === "image" ? (
         <img

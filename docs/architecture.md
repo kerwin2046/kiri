@@ -380,3 +380,37 @@ git diff --check
 Capture, recording, permission, focus, or overlay changes also require a
 stable-signed packaged-app check on macOS and the corresponding Windows CI and
 real-device acceptance.
+
+## Video trimming and microphone checks
+
+The video viewer owns an ordered list of retained source intervals and timed
+normalized zoom/mask rectangles. A bounded undo history covers edits. A separate
+video decoder extracts twelve small timeline thumbnails, while preview playback
+skips removed source intervals. Editing effect geometry shows the full source;
+the canvas preview applies opaque masks before zooming, matching native export. `export_video_copy` accepts an asset ID only from its matching viewer.
+A single-flight worker opens the readable source under the library lock,
+copies a snapshot outside the lock, then uses AVFoundation or Windows MediaComposition to concatenate the retained
+intervals and render a new MP4. Native
+metadata validates ordered, nonoverlapping source intervals (at most 128), effect
+rectangles and source-time effect ranges (at most 128). macOS maps composition
+time back to source time for CI effects. Windows splits intervals at effect
+boundaries, crops zoom clips and maps black overlays into each output viewport.
+Rotated Windows inputs reject effects explicitly to avoid misplaced masks. Import checks the original library
+identity and generation before adding a separate asset; temporary files are
+removed on failure and the original asset is never overwritten. The library
+receives only completed output. High quality retains source dimensions; Share
+and Small cap the longest edge at 1080 and 720 pixels, without upscaling.
+
+Windows CI runs the native video renderer against isolated generated fixtures,
+checks the exported duration and decoded pixels before/during/after timed effects,
+and retains the input, output and frames as `windows-video-export-review` artifacts.
+This complements the existing isolated countdown/recording desktop check; UTM is
+not required for these checks. Hardware-specific drivers and consumer Windows
+permission behavior remain outside the hosted runner's coverage.
+
+The explicit microphone check samples the system default input through cpal
+for at most five seconds, sends only device name and levels to the owning
+overlay, and never writes samples. It validates the capture session before and
+after permission requests. Cancellation and starting a recording invalidate the
+check, and closing the overlay ends it. Remembered microphone preferences do
+not automatically start this test.

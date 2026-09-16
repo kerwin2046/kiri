@@ -102,8 +102,18 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
-      - name: Run Windows regression tests
+      - name: Run Windows regression and native video export tests
+        timeout-minutes: 20
         run: cargo test --manifest-path src-tauri/Cargo.toml
+        env:
+          KIRI_VIDEO_QA_DIR: ${{ runner.temp }}/kiri-video-export-review
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-video-export-review
+          path: ${{ runner.temp }}/kiri-video-export-review/
+          retention-days: 5
+          if-no-files-found: warn
       - name: Compile Windows app for pull requests
         if: github.event_name == 'pull_request'
         run: pnpm tauri build --no-bundle

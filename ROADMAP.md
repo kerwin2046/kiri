@@ -64,7 +64,9 @@ Release validation still open:
 
 - [ ] Blur annotation
 - [ ] Full-display recording
-- [ ] MP4 trimming
+- [x] Thumbnail video timeline with draggable clip edges, split/delete, undo/redo, and non-destructive library copies
+- [x] Timed zoom regions and opaque privacy masks in preview and native MP4 export
+- [x] Native MP4 export size presets and explicit five-second microphone checks
 - [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
 - [ ] Smart collections

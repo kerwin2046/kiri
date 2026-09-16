@@ -89,3 +89,7 @@ development.
 
 - [ADR 0032: Localized Kiri installer](adr/0032-localized-kiri-installer.md)
 - [ADR 0033: Shared installer source](adr/0033-shared-installer-source.md)
+
+- [0034 — Local video trimming and microphone checks](adr/0034-local-video-trimming-and-input-check.md)
+
+- [0035 — Video timeline and timed effects](adr/0035-video-timeline-and-timed-effects.md)
