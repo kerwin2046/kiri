@@ -394,7 +394,8 @@ intervals and render a new MP4. Native
 metadata validates ordered, nonoverlapping source intervals (at most 128), effect
 rectangles and source-time effect ranges (at most 128). macOS maps composition
 time back to source time for CI effects. Windows splits intervals at effect
-boundaries, crops zoom clips and maps black overlays into each output viewport.
+boundaries, crops zoom clips through MediaTranscoder into temporary native MP4
+segments, then composes them and maps black overlays into each output viewport.
 Rotated Windows inputs reject effects explicitly to avoid misplaced masks. Import checks the original library
 identity and generation before adding a separate asset; temporary files are
 removed on failure and the original asset is never overwritten. The library

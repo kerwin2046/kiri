@@ -158,6 +158,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Media_Ocr",
     "Media_Transcoding",
+    "Foundation_Collections",
     "Media_Editing",
     "Media_Effects",
     "Media_MediaProperties",

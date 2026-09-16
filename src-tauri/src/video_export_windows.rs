@@ -14,7 +14,7 @@ use windows::{
         },
         Effects::VideoTransformEffectDefinition,
         MediaProperties::MediaEncodingProfile,
-        Transcoding::TranscodeFailureReason,
+        Transcoding::{MediaTranscoder, TranscodeFailureReason},
     },
     Storage::{FileProperties::VideoOrientation, StorageFile},
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
@@ -95,6 +95,7 @@ pub(super) fn platform_export(
     let mut mask_files: HashMap<(u32, u32), StorageFile> = HashMap::new();
     let mut output_time = 0_i64;
     let mut overlay_count = 0_usize;
+    let mut zoom_count = 0_usize;
     for segment in segments {
         // Each zoom interval becomes a native clip with a constant crop. Mask timing
         // remains independent and uses composition time after deleted footage is removed.
@@ -113,7 +114,7 @@ pub(super) fn platform_export(
         boundaries.dedup();
         for range in boundaries.windows(2) {
             let (start, end) = (range[0], range[1]);
-            let clip = source_clip.Clone()?;
+            let mut clip = source_clip.Clone()?;
             let original_duration = clip.OriginalDuration()?.Duration;
             if end > original_duration || end <= start {
                 bail!("Invalid native video clip duration");
@@ -142,7 +143,47 @@ pub(super) fn platform_export(
                     Width: output_width as f32,
                     Height: output_height as f32,
                 })?;
-                clip.VideoEffectDefinitions()?.Append(&transform)?;
+                // Run the transform in the transcoder, then compose its encoded
+                // result. Attaching this transform directly to a composition clip
+                // fails at runtime on Windows with MF_E_INVALID_STREAM_STATE.
+                zoom_count += 1;
+                let path = images.path().join(format!("zoom-{zoom_count}.mp4"));
+                std::fs::File::create(&path)?;
+                let destination = storage_file(&path)?;
+                let transcoder = MediaTranscoder::new()?;
+                transcoder.SetTrimStartTime(TimeSpan { Duration: start })?;
+                transcoder.SetTrimStopTime(TimeSpan { Duration: end })?;
+                transcoder.AddVideoEffectWithSettings(
+                    &transform.ActivatableClassId()?,
+                    true,
+                    &transform.Properties()?,
+                )?;
+                let prepared = transcoder
+                    .PrepareFileTranscodeAsync(&input, &destination, &profile)?
+                    .join()
+                    .context("preparing Windows zoom segment")?;
+                if !prepared.CanTranscode()? {
+                    bail!(
+                        "Windows cannot prepare zoom segment: {:?}",
+                        prepared.FailureReason()?
+                    );
+                }
+                prepared
+                    .TranscodeAsync()?
+                    .join()
+                    .context("encoding Windows zoom segment")?;
+                clip = MediaClip::CreateFromFileAsync(&destination)?
+                    .join()
+                    .context("opening encoded Windows zoom segment")?;
+                let rendered_duration = clip.OriginalDuration()?.Duration;
+                if rendered_duration < end - start - 500_000 {
+                    bail!("Windows zoom segment was shorter than requested");
+                }
+                if rendered_duration > end - start {
+                    clip.SetTrimTimeFromEnd(TimeSpan {
+                        Duration: rendered_duration - (end - start),
+                    })?;
+                }
             }
             composition.Clips()?.Append(&clip)?;
             for mask in effects
@@ -205,7 +246,8 @@ pub(super) fn platform_export(
     let destination = storage_file(output)?;
     let result = composition
         .RenderToFileWithProfileAsync(&destination, MediaTrimmingPreference::Precise, &profile)?
-        .join()?;
+        .join()
+        .context("rendering Windows edited composition")?;
     if result != TranscodeFailureReason::None {
         bail!("Windows cannot export this video: {result:?}");
     }
