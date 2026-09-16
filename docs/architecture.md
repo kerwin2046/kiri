@@ -384,7 +384,9 @@ real-device acceptance.
 ## Video trimming and microphone checks
 
 The video viewer owns an ordered list of retained source intervals and timed
-normalized zoom/mask rectangles. A bounded undo history covers edits. A separate
+normalized zoom/mask rectangles and independent annotation tracks. The screenshot
+annotation canvas publishes editable marks into a shared, bounded undo history.
+Navigation and export commit pending text before reading the document snapshot. A separate
 video decoder extracts twelve small timeline thumbnails, while preview playback
 skips removed source intervals. Editing effect geometry shows the full source;
 the canvas preview applies opaque masks before zooming, matching native export. `export_video_copy` accepts an asset ID only from its matching viewer.
@@ -401,6 +403,15 @@ identity and generation before adding a separate asset; temporary files are
 removed on failure and the original asset is never overwritten. The library
 receives only completed output. High quality retains source dimensions; Share
 and Small cap the longest edge at 1080 and 720 pixels, without upscaling.
+
+Timed annotations carry cropped PNG overlays or mosaic alpha masks with source-time
+ranges and normalized geometry. Native validation limits annotations to 128, PNG
+dimensions to 4096, encoded payloads to 64 MiB and decoded storage to 128 MiB.
+macOS composites live-frame pixelation/blur and overlays with Core Image. Windows
+uses a bounded Media Foundation frame pass preserving source timestamps, then
+restores original audio before the existing trim/effect composition. Mosaic samples
+the changing source frame, never a frozen editor snapshot. Playback speed is a local
+viewer preference and does not change export timing.
 
 Windows CI runs the native video renderer against isolated generated fixtures,
 checks the exported duration and decoded pixels before/during/after timed effects,

@@ -1,0 +1,18 @@
+.kiri-video-annotations-editor {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;font:12px var(--kiri-font-ui);}
+.kiri-video-annotation-tools {position:absolute;left:8px;right:8px;top:8px;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px;border:1px solid var(--kiri-surface-border);border-radius:8px;background:var(--kiri-elevated);color:var(--kiri-label);pointer-events:auto;margin:0;}
+.kiri-video-annotation-tool {display:grid;place-items:center;width:30px;height:30px;padding:4px;background:transparent;border:1px solid transparent;border-radius:5px;color:inherit;cursor:pointer;}
+.kiri-video-annotation-tool[aria-pressed=true] {background:var(--kiri-group-fill);border-color:var(--kiri-label);}
+.kiri-video-annotation-tool:hover:not(:disabled) {background:var(--kiri-group-fill);}
+.kiri-video-annotation-tool:disabled {opacity:.4;cursor:default;}
+.kiri-video-annotation-tool:focus-visible,.kiri-video-annotation-swatch:focus-visible {outline:2px solid var(--kiri-label);outline-offset:2px;}
+.kiri-video-annotation-divider {width:1px;height:22px;background:var(--kiri-surface-border);margin:0 5px;}
+.kiri-video-annotation-appearance {display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-top:1px solid var(--kiri-surface-border);padding-top:6px;flex-basis:100%;}
+.kiri-video-annotation-appearance label {display:flex;align-items:center;gap:6px;}
+.kiri-video-annotation-appearance input {width:95px;}
+.kiri-video-annotation-appearance select {font:inherit;color:inherit;background:var(--kiri-group-fill);border:1px solid var(--kiri-surface-border);border-radius:4px;padding:4px;}
+.kiri-video-annotation-swatch {width:20px;height:20px;border:1px solid #777;border-radius:50%;cursor:pointer;}
+.kiri-video-annotation-swatch[aria-pressed=true] {outline:2px solid var(--kiri-label);outline-offset:2px;}
+.kiri-video-annotation-swatch:hover {transform:scale(1.12);}
+.kiri-video-annotation-surface {position:relative;pointer-events:auto;}
+
+.kiri-video-annotation-tools--hosted {position:relative;inset:auto;border:0;border-bottom:1px solid var(--kiri-surface-border);border-radius:0;padding:6px 12px;}

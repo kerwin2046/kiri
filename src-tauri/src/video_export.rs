@@ -47,6 +47,144 @@ pub struct VideoEffect {
     pub height: f64,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoAnnotationKind {
+    Overlay,
+    Pixelate,
+    Blur,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoAnnotation {
+    pub start: f64,
+    pub end: f64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub kind: VideoAnnotationKind,
+    pub image_base64: String,
+    pub amount: f64,
+}
+
+pub(super) struct PreparedVideoAnnotation {
+    pub start: f64,
+    pub end: f64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub kind: VideoAnnotationKind,
+    pub image: image::RgbaImage,
+    pub amount: f64,
+}
+
+fn prepare_annotations(annotations: &[VideoAnnotation]) -> Result<Vec<PreparedVideoAnnotation>> {
+    use base64::Engine;
+    use image::ImageDecoder;
+    if annotations.len() > 128 {
+        bail!("Too many video annotations");
+    }
+    let encoded_bytes = annotations
+        .iter()
+        .try_fold(0usize, |sum, annotation| {
+            sum.checked_add(annotation.image_base64.len())
+        })
+        .context("Video annotation payload is too large")?;
+    if encoded_bytes > 64 * 1024 * 1024 {
+        bail!("Video annotation payload is too large");
+    }
+    let mut remaining = 128u64 * 1024 * 1024;
+    annotations
+        .iter()
+        .map(|annotation| {
+            let VideoAnnotation {
+                start,
+                end,
+                x,
+                y,
+                width,
+                height,
+                amount,
+                ..
+            } = *annotation;
+            if [start, end, x, y, width, height, amount]
+                .iter()
+                .any(|value| !value.is_finite())
+                || start < 0.0
+                || end <= start
+                || x < 0.0
+                || y < 0.0
+                || width <= 0.0
+                || height <= 0.0
+                || x + width > 1.000001
+                || y + height > 1.000001
+                || amount < 0.0
+                || amount > 1.0
+                || (annotation.kind != VideoAnnotationKind::Overlay && amount <= 0.0)
+            {
+                bail!("Invalid video annotation timing, rectangle or amount");
+            }
+            let encoded = annotation
+                .image_base64
+                .strip_prefix("data:image/png;base64,")
+                .unwrap_or(&annotation.image_base64);
+            let png = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .context("Invalid video annotation base64")?;
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(4096);
+            limits.max_image_height = Some(4096);
+            limits.max_alloc = Some(remaining);
+            let decoder =
+                image::codecs::png::PngDecoder::with_limits(std::io::Cursor::new(png), limits)
+                    .context("Invalid or oversized video annotation PNG")?;
+            let (pixel_width, pixel_height) = decoder.dimensions();
+            let size = u64::from(pixel_width) * u64::from(pixel_height) * 4;
+            let peak_size = if decoder.color_type() == image::ColorType::Rgba8 {
+                size
+            } else {
+                size.checked_add(decoder.total_bytes())
+                    .context("Decoded video annotations are too large")?
+            };
+            if peak_size > remaining {
+                bail!("Decoded video annotations are too large");
+            }
+            let image = image::DynamicImage::from_decoder(decoder)?.into_rgba8();
+            remaining -= size;
+            Ok(PreparedVideoAnnotation {
+                start,
+                end,
+                x,
+                y,
+                width,
+                height,
+                amount,
+                kind: annotation.kind,
+                image,
+            })
+        })
+        .collect()
+}
+
+fn validate_annotation_duration(
+    annotations: &[PreparedVideoAnnotation],
+    duration: f64,
+) -> Result<()> {
+    if !duration.is_finite()
+        || duration <= 0.0
+        || annotations
+            .iter()
+            .any(|annotation| annotation.start >= duration || annotation.end > duration + 0.05)
+    {
+        bail!("Video annotation is outside the source duration");
+    }
+    Ok(())
+}
+
 fn validate_effects(effects: &[VideoEffect], duration: Option<f64>) -> Result<()> {
     if effects.len() > 128 {
         bail!("Too many video effects");
@@ -122,19 +260,32 @@ fn validate_segments(
 
 /// The caller must remove the returned staging file after importing it.
 /// A failed export removes all staging files and never modifies the source.
+#[cfg(test)]
 pub fn export_video(
     source: &Path,
     segments: &[VideoSegment],
     effects: &[VideoEffect],
     preset: VideoExportPreset,
 ) -> Result<(PathBuf, i64, i64, f64)> {
+    export_video_with_annotations(source, segments, effects, &[], preset)
+}
+
+pub fn export_video_with_annotations(
+    source: &Path,
+    segments: &[VideoSegment],
+    effects: &[VideoEffect],
+    annotations: &[VideoAnnotation],
+    preset: VideoExportPreset,
+) -> Result<(PathBuf, i64, i64, f64)> {
     validate_segments(segments, None)?;
     validate_effects(effects, None)?;
+    let annotations = prepare_annotations(annotations)?;
     let staging = tempfile::Builder::new()
         .prefix("kiri-video-export-")
         .tempdir()?;
     let output = staging.path().join("export.mp4");
-    let (width, height, duration) = platform_export(source, &output, segments, effects, preset)?;
+    let (width, height, duration) =
+        platform_export(source, &output, segments, effects, &annotations, preset)?;
     if width <= 0
         || height <= 0
         || !duration.is_finite()
@@ -156,12 +307,43 @@ fn platform_export(
     output: &Path,
     segments: &[VideoSegment],
     effects: &[VideoEffect],
+    annotations: &[PreparedVideoAnnotation],
     preset: VideoExportPreset,
 ) -> Result<(i64, i64, f64)> {
     use std::{
         ffi::{c_char, CStr, CString},
         os::unix::ffi::OsStrExt,
     };
+    #[repr(C)]
+    struct NativeAnnotation {
+        kind: VideoAnnotationKind,
+        start: f64,
+        end: f64,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        amount: f64,
+        pixels: *const u8,
+        pixel_width: u32,
+        pixel_height: u32,
+    }
+    let native_annotations: Vec<_> = annotations
+        .iter()
+        .map(|annotation| NativeAnnotation {
+            kind: annotation.kind,
+            start: annotation.start,
+            end: annotation.end,
+            x: annotation.x,
+            y: annotation.y,
+            width: annotation.width,
+            height: annotation.height,
+            amount: annotation.amount,
+            pixels: annotation.image.as_raw().as_ptr(),
+            pixel_width: annotation.image.width(),
+            pixel_height: annotation.image.height(),
+        })
+        .collect();
     unsafe extern "C" {
         fn kiri_export_video(
             source: *const c_char,
@@ -170,6 +352,8 @@ fn platform_export(
             count: usize,
             effects: *const VideoEffect,
             effect_count: usize,
+            annotations: *const NativeAnnotation,
+            annotation_count: usize,
             max_edge: u32,
             error: *mut c_char,
             capacity: usize,
@@ -179,6 +363,7 @@ fn platform_export(
     let duration = duration.context("video duration is unavailable")?;
     let segments = validate_segments(segments, Some(duration))?;
     validate_effects(effects, Some(duration))?;
+    validate_annotation_duration(annotations, duration)?;
     let source = CString::new(source.as_os_str().as_bytes())?;
     let destination = CString::new(output.as_os_str().as_bytes())?;
     let mut error = [0 as c_char; 1024];
@@ -190,6 +375,8 @@ fn platform_export(
             segments.len(),
             effects.as_ptr(),
             effects.len(),
+            native_annotations.as_ptr(),
+            native_annotations.len(),
             preset.max_edge(),
             error.as_mut_ptr(),
             error.len(),
@@ -221,6 +408,7 @@ fn platform_export(
     _: &Path,
     _: &[VideoSegment],
     _: &[VideoEffect],
+    _: &[PreparedVideoAnnotation],
     _: VideoExportPreset,
 ) -> Result<(i64, i64, f64)> {
     bail!("Native video export is supported on macOS and Windows")
@@ -323,6 +511,168 @@ mod tests {
             Some(2.0)
         )
         .is_err());
+    }
+
+    fn annotation_png(image: image::RgbaImage) -> String {
+        use base64::Engine;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+    }
+
+    #[test]
+    fn annotation_payload_limits_and_geometry_are_validated() {
+        let annotation = VideoAnnotation {
+            start: 0.0,
+            end: 1.0,
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 0.5,
+            kind: VideoAnnotationKind::Overlay,
+            amount: 0.0,
+            image_base64: annotation_png(image::RgbaImage::from_pixel(
+                2,
+                2,
+                image::Rgba([255, 0, 0, 255]),
+            )),
+        };
+        assert_eq!(
+            prepare_annotations(&[annotation.clone()]).unwrap()[0]
+                .image
+                .dimensions(),
+            (2, 2)
+        );
+        assert!(prepare_annotations(&vec![annotation.clone(); 129]).is_err());
+        assert!(prepare_annotations(&[VideoAnnotation {
+            width: f64::NAN,
+            ..annotation.clone()
+        }])
+        .is_err());
+        assert!(prepare_annotations(&[VideoAnnotation {
+            image_base64: "not-png".into(),
+            ..annotation.clone()
+        }])
+        .is_err());
+        assert!(prepare_annotations(&[VideoAnnotation {
+            kind: VideoAnnotationKind::Blur,
+            ..annotation.clone()
+        }])
+        .is_err());
+        let oversized = annotation_png(image::RgbaImage::new(4097, 1));
+        assert!(prepare_annotations(&[VideoAnnotation {
+            image_base64: oversized,
+            ..annotation
+        }])
+        .is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_annotations_follow_live_frames_and_independent_time_ranges() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("moving-stripes.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 64, 48, 30, 1_000_000, false).unwrap();
+        for index in 0..90 {
+            let mut frame = vec![0u8; 64 * 48 * 4];
+            for y in 0..48 {
+                for x in 0..64 {
+                    let channel = if index < 30 {
+                        2
+                    } else if index < 60 {
+                        1
+                    } else {
+                        0
+                    };
+                    frame[(y * 64 + x) * 4 + channel] = if x % 4 < 2 { 255 } else { 90 };
+                    frame[(y * 64 + x) * 4 + 3] = 255;
+                }
+            }
+            assert!(encoder.append_video(&frame, index).unwrap());
+        }
+        encoder.finish().unwrap();
+        let coverage = annotation_png(image::RgbaImage::from_pixel(
+            32,
+            48,
+            image::Rgba([255, 255, 255, 255]),
+        ));
+        // Asymmetric overlay additionally proves PNG rows retain top-left orientation.
+        let mut overlay = image::RgbaImage::new(32, 24);
+        for y in 0..12 {
+            for x in 0..32 {
+                overlay.put_pixel(x, y, image::Rgba([255, 255, 0, 255]));
+            }
+        }
+        let overlay = annotation_png(overlay);
+        for kind in [VideoAnnotationKind::Pixelate, VideoAnnotationKind::Blur] {
+            let annotations = [
+                VideoAnnotation {
+                    start: 0.5,
+                    end: 2.5,
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.5,
+                    height: 1.0,
+                    kind,
+                    amount: 0.25,
+                    image_base64: coverage.clone(),
+                },
+                VideoAnnotation {
+                    start: 1.0,
+                    end: 2.0,
+                    x: 0.5,
+                    y: 0.0,
+                    width: 0.5,
+                    height: 0.5,
+                    kind: VideoAnnotationKind::Overlay,
+                    amount: 0.0,
+                    image_base64: overlay.clone(),
+                },
+            ];
+            let (output, _, _, _) = export_video_with_annotations(
+                &source,
+                &[VideoSegment {
+                    start: 0.0,
+                    end: 3.0,
+                }],
+                &[],
+                &annotations,
+                VideoExportPreset::Original,
+            )
+            .unwrap();
+            let before = frame_at(&output, 0.2);
+            assert!(before.get_pixel(8, 24)[0].abs_diff(before.get_pixel(10, 24)[0]) > 80);
+            let first = frame_at(&output, 0.7);
+            assert!(first.get_pixel(8, 24)[0] > 70 && first.get_pixel(8, 24)[1] < 45);
+            assert!(
+                first.get_pixel(8, 24)[0].abs_diff(first.get_pixel(10, 24)[0]) < 35,
+                "{kind:?} must alter the live source texture"
+            );
+            let second = frame_at(&output, 1.2);
+            assert!(
+                second.get_pixel(8, 24)[1] > 70 && second.get_pixel(8, 24)[0] < 45,
+                "{kind:?} must use each current source frame"
+            );
+            let yellow = second.get_pixel(48, 4);
+            assert!(
+                yellow[0] > 180 && yellow[1] > 180 && yellow[2] < 45,
+                "timed overlay missing: {yellow:?}"
+            );
+            assert!(
+                second.get_pixel(48, 20)[0] < 45,
+                "transparent lower overlay half must retain source"
+            );
+            let after = frame_at(&output, 2.7);
+            assert!(after.get_pixel(8, 24)[2].abs_diff(after.get_pixel(10, 24)[2]) > 80);
+            assert!(
+                after.get_pixel(48, 4)[0] < 45,
+                "overlay must end independently"
+            );
+            std::fs::remove_file(output).unwrap();
+        }
     }
 
     #[cfg(target_os = "macos")]

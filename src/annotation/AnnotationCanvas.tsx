@@ -72,6 +72,12 @@ interface Props {
   displaySize?: { width: number; height: number };
   /** Persisted baseline. It is loaded once, without creating undo history. */
   initialDocument?: AnnotationDocumentV1;
+  /** Video editors can reload an externally owned history without remounting. */
+  documentRevision?: number;
+  selectedMarkId?: number;
+  onDocumentChange?(marks: AnnotationMark[]): void;
+  onUndo?(): void;
+  onRedo?(): void;
   /** CSS viewport size; document coordinates remain fixed to canvas/region. */
   viewSize?: { width: number; height: number };
   /** Prevents edits while an immutable export snapshot is being committed. */
@@ -114,6 +120,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       region,
       displaySize,
       initialDocument,
+      documentRevision,
+      selectedMarkId,
+      onDocumentChange,
+      onUndo,
+      onRedo,
       viewSize,
       interactionDisabled = false,
       interactionLock,
@@ -207,8 +218,29 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       );
     }, [history, onHistoryChange]);
 
+    const documentChangeRef = useRef(onDocumentChange);
+    documentChangeRef.current = onDocumentChange;
+    const loadedRevisionRef = useRef(documentRevision);
+    useEffect(() => {
+      if (loadedRevisionRef.current === documentRevision) return;
+      loadedRevisionRef.current = documentRevision;
+      const document = initialDocument ? parseAnnotationDocument(initialDocument) : null;
+      history.load(document?.marks ?? []);
+      interactionRef.current = {kind: "none"};
+      editingRef.current = null;
+      setEditing(null); setDraft(null); setSelectedIndex(null);
+      setMarks(history.elements.slice());
+      publishHistory();
+    }, [documentRevision, initialDocument, history, publishHistory]);
+    useEffect(() => {
+      if (selectedMarkId === undefined) return;
+      const index = history.elements.findIndex(mark => mark.id === selectedMarkId);
+      setSelectedIndex(index < 0 ? null : index);
+    }, [selectedMarkId, documentRevision, history]);
+
     const syncMarks = useCallback(() => {
       setMarks(history.elements.slice());
+      documentChangeRef.current?.(history.elements.slice());
       publishHistory();
     }, [history, publishHistory]);
 
@@ -267,6 +299,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         viewScaleX,
         viewScaleY,
         exporting: false,
+        filterScale: documentChangeRef.current ? devicePixelRatio * Math.min(viewScaleX, viewScaleY) : undefined,
       };
       renderAll(context, marks, {
         draft,
@@ -295,7 +328,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
     useEffect(() => {
       redraw();
-    }, [redraw]);
+    }, [redraw, image]);
 
     const toPoint = useCallback((e: React.PointerEvent | MouseEvent): Point => {
       const canvas = canvasRef.current!;
@@ -813,6 +846,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     undoRef.current = () => {
       if (interactionsDisabled()) return;
       commitText();
+      if (onUndo) { onUndo(); return; }
       history.undo();
       setSelectedIndex(null);
       syncMarks();
@@ -820,6 +854,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     redoRef.current = () => {
       if (interactionsDisabled()) return;
       commitText();
+      if (onRedo) { onRedo(); return; }
       history.redo();
       setSelectedIndex(null);
       syncMarks();
@@ -864,7 +899,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const before = history.elements.slice();
       before[adjust.index] = updated;
       history.overwrite(before);
-      syncMarks();
+      // Keep live slider frames local; external history gets one final commit.
+      setMarks(history.elements.slice());
+      publishHistory();
     };
     const finishFontAdjustment = useCallback(() => {
       const adjust = fontAdjustRef.current;

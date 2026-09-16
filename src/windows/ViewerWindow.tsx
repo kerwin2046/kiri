@@ -250,6 +250,7 @@ export function ViewerWindow(props: { id: string }) {
           id={props.id}
           src={mediaUrl(props.id)}
           editable={state.kind === "ready" && !state.asset.trashedAt}
+          onClose={close}
           onError={() => void handleMediaError()}
         />
       ) : mediaKind === "image" ? (
@@ -269,7 +270,7 @@ export function ViewerWindow(props: { id: string }) {
         </button>
         {ocrOpen && <OcrDialog asset={state.asset} onClose={() => setOcrOpen(false)} />}
       </>}
-      <button
+      {!(state.kind === "ready" && mediaKind === "video") && <><button
         type="button"
         className="kiri-icon-button kiri-icon-button--hud"
         onClick={close}
@@ -298,7 +299,7 @@ export function ViewerWindow(props: { id: string }) {
         }}
       >
         {t("Esc to close")}
-      </div>
+      </div></>}
     </div>
   );
 }

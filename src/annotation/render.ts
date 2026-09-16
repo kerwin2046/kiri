@@ -50,6 +50,8 @@ export interface RenderContext {
   viewScaleY: number;
   /** True when rendering the export bitmap in pixel space. */
   exporting: boolean;
+  /** Canvas filters operate in destination bitmap pixels, independent of transform. */
+  filterScale?: number;
 }
 
 export interface RenderGeometryScale {
@@ -120,7 +122,7 @@ function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[]) {
 }
 
 /** Draws one mark into the given context (already in the right space). */
-function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingContext2D) {
+export function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingContext2D) {
   switch (mark.kind) {
     case "pen": {
       const points = mark.points.map((p) => exportPoint(p, r));
@@ -277,7 +279,7 @@ function mosaicStrokeBounds(points: Point[], diameter: number, region: Rect): Re
   return clipped.width >= 1 && clipped.height >= 1 ? clipped : null;
 }
 
-function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number) {
+export function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number) {
   ctx.save();
   ctx.beginPath();
   // Canvas 2D clip() uses the path's *fill* region, so an open polyline
@@ -340,7 +342,7 @@ function drawMosaicMark(
     offCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
     const blurPx = mosaicBlurRadius(mark.brushDiameter, mark.intensity, scale);
     clipToMosaicStroke(ctx, points, clipDiameter);
-    ctx.filter = `blur(${blurPx}px)`;
+    ctx.filter = `blur(${blurPx * (r.filterScale ?? 1)}px)`;
     ctx.drawImage(off, 0, 0, cw, ch, drawX, drawY, drawW, drawH);
     ctx.filter = "none";
     ctx.restore();

@@ -66,7 +66,7 @@ impl Drop for MediaFoundationGuard {
 }
 
 #[cfg(windows)]
-struct WindowsVideoReader {
+pub(crate) struct WindowsVideoReader {
     reader: windows::Win32::Media::MediaFoundation::IMFSourceReader,
     width: u32,
     height: u32,
@@ -78,7 +78,7 @@ struct WindowsVideoReader {
 
 #[cfg(windows)]
 impl WindowsVideoReader {
-    fn open(video: &Path) -> Result<Self> {
+    pub(crate) fn open(video: &Path) -> Result<Self> {
         use windows::core::HSTRING;
         use windows::Win32::Media::MediaFoundation::{
             MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Video,
@@ -143,11 +143,11 @@ impl WindowsVideoReader {
         })
     }
 
-    fn dimensions(&self) -> (u32, u32) {
+    pub(crate) fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    fn read_frame(&self) -> Result<Option<(i64, image::RgbaImage)>> {
+    pub(crate) fn read_frame(&self) -> Result<Option<(i64, image::RgbaImage)>> {
         use windows::Win32::Media::MediaFoundation::{
             MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
         };

@@ -5,10 +5,24 @@
 
 typedef struct { double start; double end; } KiriVideoSegment;
 typedef struct { unsigned kind; double start, end, x, y, width, height; } KiriVideoEffect;
+typedef struct {
+    unsigned kind;
+    double start, end, x, y, width, height, amount;
+    const unsigned char *pixels;
+    unsigned pixelWidth, pixelHeight;
+} KiriVideoAnnotation;
+
+static CIImage *KiriPlacedAnnotation(CIImage *image, KiriVideoAnnotation annotation, CGRect extent) {
+    CGRect rect = CGRectMake(extent.origin.x + annotation.x * extent.size.width,
+        extent.origin.y + (1 - annotation.y - annotation.height) * extent.size.height,
+        annotation.width * extent.size.width, annotation.height * extent.size.height);
+    image = [image imageByApplyingTransform:CGAffineTransformMakeScale(rect.size.width / annotation.pixelWidth, rect.size.height / annotation.pixelHeight)];
+    return [image imageByApplyingTransform:CGAffineTransformMakeTranslation(rect.origin.x, rect.origin.y)];
+}
 
 // Called only on a background worker; the source is immutable and output is staging.
 bool kiri_export_video(const char *source, const char *output, const KiriVideoSegment *segments,
-                       size_t count, const KiriVideoEffect *effects, size_t effectCount, unsigned maxEdge, char *error, size_t capacity) {
+                       size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, unsigned maxEdge, char *error, size_t capacity) {
     @autoreleasepool {
         @try {
 #pragma clang diagnostic push
@@ -71,7 +85,23 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                 float fps = track.nominalFrameRate;
                 frameDuration = CMTimeMakeWithSeconds(1.0 / (isfinite(fps) && fps > 0 ? fps : 30), 600000);
             }
-            if (effectCount > 0) {
+            NSMutableArray<CIImage *> *annotationImages = [NSMutableArray arrayWithCapacity:annotationCount];
+            for (size_t index = 0; index < annotationCount; index++) {
+                KiriVideoAnnotation annotation = annotations[index];
+                NSData *data = [NSData dataWithBytes:annotation.pixels length:(size_t)annotation.pixelWidth * annotation.pixelHeight * 4];
+                CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
+                CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                CGImageRef cgImage = CGImageCreate(annotation.pixelWidth, annotation.pixelHeight, 8, 32,
+                    annotation.pixelWidth * 4, colorSpace, kCGImageAlphaLast | kCGBitmapByteOrderDefault,
+                    provider, NULL, false, kCGRenderingIntentDefault);
+                CIImage *image = cgImage ? [CIImage imageWithCGImage:cgImage] : nil;
+                if (cgImage) CGImageRelease(cgImage);
+                CGColorSpaceRelease(colorSpace);
+                CGDataProviderRelease(provider);
+                if (!image) { snprintf(error, capacity, "Could not prepare video annotation image."); return false; }
+                [annotationImages addObject:image];
+            }
+            if (effectCount > 0 || annotationCount > 0) {
                 AVVideoComposition *filtered = [AVVideoComposition videoCompositionWithAsset:edited applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request) {
                     double outputTime = CMTimeGetSeconds(request.compositionTime);
                     double sourceTime = segments[count - 1].end;
@@ -84,6 +114,26 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     CIImage *image = request.sourceImage;
                     CGRect extent = image.extent;
                     // CI coordinates are bottom-left; UI rectangles are normalized top-left.
+                    for (size_t index = 0; index < annotationCount; index++) {
+                        KiriVideoAnnotation annotation = annotations[index];
+                        if (annotation.kind == 0 || sourceTime < annotation.start || sourceTime >= annotation.end) continue;
+                        CIImage *mask = KiriPlacedAnnotation(annotationImages[index], annotation, extent);
+                        CIImage *transparent = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:0]] imageByCroppingToRect:extent];
+                        mask = [mask imageByCompositingOverImage:transparent];
+                        double amount = MAX(1, annotation.amount * extent.size.width);
+                        NSString *filter = annotation.kind == 1 ? @"CIPixellate" : @"CIGaussianBlur";
+                        NSString *parameter = annotation.kind == 1 ? kCIInputScaleKey : kCIInputRadiusKey;
+                        CIImage *processed = [[[image imageByClampingToExtent] imageByApplyingFilter:filter
+                            withInputParameters:@{parameter: @(amount)}] imageByCroppingToRect:extent];
+                        image = [processed imageByApplyingFilter:@"CIBlendWithAlphaMask" withInputParameters:@{
+                            kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: mask}];
+                    }
+                    for (size_t index = 0; index < annotationCount; index++) {
+                        KiriVideoAnnotation annotation = annotations[index];
+                        if (annotation.kind != 0 || sourceTime < annotation.start || sourceTime >= annotation.end) continue;
+                        CIImage *overlay = KiriPlacedAnnotation(annotationImages[index], annotation, extent);
+                        image = [overlay imageByCompositingOverImage:image];
+                    }
                     for (size_t index = 0; index < effectCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 1 || sourceTime < effect.start || sourceTime >= effect.end) continue;

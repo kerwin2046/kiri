@@ -1,7 +1,7 @@
 //! Windows native timeline renderer. Coordinates are normalized to the source frame.
 use super::{
-    validate_effects, validate_segments, VideoEffect, VideoEffectKind, VideoExportPreset,
-    VideoSegment,
+    validate_annotation_duration, validate_effects, validate_segments, PreparedVideoAnnotation,
+    VideoEffect, VideoEffectKind, VideoExportPreset, VideoSegment,
 };
 use anyhow::{bail, Context, Result};
 use std::{collections::HashMap, path::Path};
@@ -10,7 +10,8 @@ use windows::{
     Foundation::{Rect, Size, TimeSpan},
     Media::{
         Editing::{
-            MediaClip, MediaComposition, MediaOverlay, MediaOverlayLayer, MediaTrimmingPreference,
+            BackgroundAudioTrack, MediaClip, MediaComposition, MediaOverlay, MediaOverlayLayer,
+            MediaTrimmingPreference,
         },
         Effects::VideoTransformEffectDefinition,
         MediaProperties::MediaEncodingProfile,
@@ -19,6 +20,9 @@ use windows::{
     Storage::{FileProperties::VideoOrientation, StorageFile},
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
 };
+
+#[path = "video_annotation_windows.rs"]
+mod annotations;
 
 // WinRT rejects forward slashes even though Rust file APIs accept them.
 // Keep UTF-16 intact so paths containing non-ASCII names remain readable.
@@ -50,6 +54,7 @@ pub(super) fn platform_export(
     output: &Path,
     segments: &[VideoSegment],
     effects: &[VideoEffect],
+    annotations: &[PreparedVideoAnnotation],
     preset: VideoExportPreset,
 ) -> Result<(i64, i64, f64)> {
     struct Apartment;
@@ -67,12 +72,57 @@ pub(super) fn platform_export(
     let duration = source_clip.OriginalDuration()?.Duration as f64 / 10_000_000.0;
     let segments = validate_segments(segments, Some(duration))?;
     validate_effects(effects, Some(duration))?;
+    validate_annotation_duration(annotations, duration)?;
     // Reject ambiguous rotated coordinates instead of silently exposing a masked region.
     // Kiri's own capture encoder writes upright frames without rotation metadata.
-    if !effects.is_empty() && properties.Orientation()? != VideoOrientation::Normal {
+    if (!effects.is_empty() || !annotations.is_empty())
+        && properties.Orientation()? != VideoOrientation::Normal
+    {
         bail!("Windows cannot apply video effects to rotated source videos; export an upright copy first");
     }
     let profile = MediaEncodingProfile::CreateFromFileAsync(&input)?.join()?;
+    if !annotations.is_empty() {
+        let staging = tempfile::Builder::new()
+            .prefix("kiri-video-annotations-")
+            .tempdir()?;
+        let silent_path = staging.path().join("annotated-video.mp4");
+        annotations::render(
+            source,
+            &silent_path,
+            source_clip.OriginalDuration()?.Duration,
+            annotations,
+            &profile,
+        )?;
+        let tracks = source_clip.EmbeddedAudioTracks()?;
+        let annotated_source = if tracks.Size()? > 0 {
+            let composed = MediaComposition::new()?;
+            composed
+                .Clips()?
+                .Append(&MediaClip::CreateFromFileAsync(&storage_file(&silent_path)?)?.join()?)?;
+            // Preserve every embedded source track, including separate microphone/system tracks.
+            for index in 0..tracks.Size()? {
+                composed.BackgroundAudioTracks()?.Append(
+                    &BackgroundAudioTrack::CreateFromEmbeddedAudioTrack(&tracks.GetAt(index)?)?,
+                )?;
+            }
+            let with_audio = staging.path().join("annotated-with-audio.mp4");
+            std::fs::File::create(&with_audio)?;
+            let result = composed
+                .RenderToFileWithProfileAsync(
+                    &storage_file(&with_audio)?,
+                    MediaTrimmingPreference::Precise,
+                    &profile,
+                )?
+                .join()?;
+            if result != TranscodeFailureReason::None {
+                bail!("Windows cannot preserve annotated video audio: {result:?}");
+            }
+            with_audio
+        } else {
+            silent_path
+        };
+        return platform_export(&annotated_source, output, &segments, effects, &[], preset);
+    }
     let video = profile.Video()?;
     let (width, height) = (video.Width()?, video.Height()?);
     if width < 2 || height < 2 {
@@ -343,6 +393,13 @@ mod tests {
                     }
                 }
             }
+            for y in 100..160 {
+                for x in (20..100).chain(200..280) {
+                    if (x / 4 + y / 4) % 2 == 0 {
+                        bitmap.put_pixel(x, y, image::Rgba([240, 240, 240, 255]));
+                    }
+                }
+            }
             let path = directory.join(format!("fixture-{index}.png"));
             bitmap.save(&path)?;
             let image = storage_file(&path)?;
@@ -355,6 +412,31 @@ mod tests {
             .join()?;
             fixture.Clips()?.Append(&clip)?;
         }
+        // A real sine-wave source verifies that annotation prepass keeps audio.
+        let audio_path = directory.join("tone.wav");
+        let mut wave = Vec::new();
+        let data_length = 48_000_u32 * 4 * 2;
+        wave.extend_from_slice(b"RIFF");
+        wave.extend_from_slice(&(36 + data_length).to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&16_u32.to_le_bytes());
+        wave.extend_from_slice(&1_u16.to_le_bytes());
+        wave.extend_from_slice(&1_u16.to_le_bytes());
+        wave.extend_from_slice(&48_000_u32.to_le_bytes());
+        wave.extend_from_slice(&96_000_u32.to_le_bytes());
+        wave.extend_from_slice(&2_u16.to_le_bytes());
+        wave.extend_from_slice(&16_u16.to_le_bytes());
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&data_length.to_le_bytes());
+        for sample in 0..192_000 {
+            let amplitude =
+                ((sample as f64 * 440.0 * std::f64::consts::TAU / 48_000.0).sin() * 8000.0) as i16;
+            wave.extend_from_slice(&amplitude.to_le_bytes());
+        }
+        std::fs::write(&audio_path, wave)?;
+        fixture.BackgroundAudioTracks()?.Append(
+            &BackgroundAudioTrack::CreateFromFileAsync(&storage_file(&audio_path)?)?.join()?,
+        )?;
         let source_path = directory.join("source.mp4");
         std::fs::File::create(&source_path)?;
         let source = storage_file(&source_path)?;
@@ -408,6 +490,7 @@ mod tests {
                     height: 0.1,
                 },
             ],
+            &[],
             VideoExportPreset::Original,
         )?;
         assert_eq!((width, height), (320, 180));
@@ -421,7 +504,12 @@ mod tests {
         decoded
             .Clips()?
             .Append(&MediaClip::CreateFromFileAsync(&exported)?.join()?)?;
-        let pixel = |time: f64, x: usize, y: usize| -> Result<[u8; 3]> {
+        let pixel = |decoded: &MediaComposition,
+                     label: &str,
+                     time: f64,
+                     x: usize,
+                     y: usize|
+         -> Result<[u8; 3]> {
             let stream = decoded
                 .GetThumbnailAsync(
                     TimeSpan {
@@ -446,32 +534,115 @@ mod tests {
                 .DetachPixelData()?;
             image::RgbaImage::from_raw(320, 180, data.to_vec())
                 .context("decoded frame has an unexpected byte count")?
-                .save(directory.join(format!("frame-{time:.2}.png")))?;
+                .save(directory.join(format!("{label}-frame-{time:.2}.png")))?;
             let offset = (y * 320 + x) * 4;
             Ok([data[offset], data[offset + 1], data[offset + 2]])
         };
-        let red = pixel(0.5, 64, 36)?;
+        let red = pixel(&decoded, "effects", 0.5, 64, 36)?;
         assert!(
             red[0] > 180 && red[1] < 60 && red[2] < 60,
             "first retained segment changed: {red:?}"
         );
         for time in [1.1, 1.9] {
-            let green = pixel(time, 64, 36)?;
+            let green = pixel(&decoded, "effects", time, 64, 36)?;
             assert!(
                 green[0] < 60 && green[1] > 180 && green[2] < 60,
                 "zoom or mask timing wrong at {time}: {green:?}"
             );
         }
-        let black = pixel(1.5, 64, 36)?;
+        let black = pixel(&decoded, "effects", 1.5, 64, 36)?;
         assert!(
             black.iter().all(|value| *value < 35),
             "privacy mask missing: {black:?}"
         );
-        let blue = pixel(1.5, 256, 144)?;
+        let blue = pixel(&decoded, "effects", 1.5, 112, 144)?;
         assert!(
             blue[0] < 60 && blue[1] < 60 && blue[2] > 180,
             "mask unexpectedly covers surrounding content: {blue:?}"
         );
+        use super::super::VideoAnnotationKind;
+        let annotation_output = directory.join("annotations.mp4");
+        platform_export(
+            &source_path,
+            &annotation_output,
+            &[
+                VideoSegment {
+                    start: 0.5,
+                    end: 1.5,
+                },
+                VideoSegment {
+                    start: 2.5,
+                    end: 3.5,
+                },
+            ],
+            &[],
+            &[
+                PreparedVideoAnnotation {
+                    start: 0.75,
+                    end: 1.25,
+                    x: 0.7,
+                    y: 0.1,
+                    width: 0.1,
+                    height: 0.1,
+                    kind: VideoAnnotationKind::Overlay,
+                    image: image::RgbaImage::from_pixel(32, 18, image::Rgba([240, 240, 20, 255])),
+                    amount: 0.0,
+                },
+                PreparedVideoAnnotation {
+                    start: 0.5,
+                    end: 3.5,
+                    x: 0.625,
+                    y: 100.0 / 180.0,
+                    width: 0.25,
+                    height: 60.0 / 180.0,
+                    kind: VideoAnnotationKind::Pixelate,
+                    image: image::RgbaImage::from_pixel(80, 60, image::Rgba([0, 0, 0, 255])),
+                    amount: 0.125,
+                },
+                PreparedVideoAnnotation {
+                    start: 0.5,
+                    end: 3.5,
+                    x: 20.0 / 320.0,
+                    y: 100.0 / 180.0,
+                    width: 0.25,
+                    height: 60.0 / 180.0,
+                    kind: VideoAnnotationKind::Blur,
+                    image: image::RgbaImage::from_pixel(80, 60, image::Rgba([0, 0, 0, 255])),
+                    amount: 0.025,
+                },
+            ],
+            VideoExportPreset::Original,
+        )?;
+        let annotated_clip =
+            MediaClip::CreateFromFileAsync(&storage_file(&annotation_output)?)?.join()?;
+        assert!(
+            annotated_clip.EmbeddedAudioTracks()?.Size()? > 0,
+            "annotation prepass dropped audio"
+        );
+        assert!((annotated_clip.OriginalDuration()?.Duration - ticks(2.0)).abs() < ticks(0.1));
+        let annotated = MediaComposition::new()?;
+        annotated.Clips()?.Append(&annotated_clip)?;
+        for (time, dominant) in [(0.5, 0), (1.5, 2)] {
+            for x in [60, 220] {
+                let mosaic = pixel(&annotated, "annotations", time, x, 120)?;
+                assert!(
+                    mosaic[dominant] > 180 && mosaic[1] > 60 && mosaic[1] < 200,
+                    "live mosaic failed or froze source at {time}, x={x}: {mosaic:?}"
+                );
+            }
+        }
+        let yellow = pixel(&annotated, "annotations", 0.5, 240, 27)?;
+        assert!(
+            yellow[0] > 180 && yellow[1] > 180 && yellow[2] < 60,
+            "timed overlay missing: {yellow:?}"
+        );
+        for time in [0.1, 0.9] {
+            let clear = pixel(&annotated, "annotations", time, 240, 27)?;
+            assert!(
+                clear[0] > 180 && clear[1] < 60 && clear[2] < 60,
+                "overlay timing wrong at {time}: {clear:?}"
+            );
+        }
         Ok(())
     }
 

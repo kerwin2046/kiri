@@ -1136,13 +1136,14 @@ pub async fn export_video_copy(
     id: String,
     segments: Vec<crate::video_export::VideoSegment>,
     effects: Vec<crate::video_export::VideoEffect>,
+    annotations: Vec<crate::video_export::VideoAnnotation>,
     preset: crate::video_export::VideoExportPreset,
 ) -> Result<String, String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     if window.label() != format!("viewer-{parsed}") {
         return Err("Video export requires its own viewer.".into());
     }
-    if segments.is_empty() || segments.len() > 128 || effects.len() > 128 {
+    if segments.is_empty() || segments.len() > 128 || effects.len() > 128 || annotations.len() > 128 {
         return Err("Invalid video edit size.".into());
     }
     VIDEO_EXPORT_BUSY.compare_exchange(false, true,
@@ -1172,8 +1173,8 @@ pub async fn export_video_copy(
         };
         std::io::copy(&mut source, snapshot.as_file_mut()).map_err(|e| e.to_string())?;
         drop(source);
-        let (path, width, height, duration) = crate::video_export::export_video(
-            snapshot.path(), &segments, &effects, preset).map_err(|e| e.to_string())?;
+        let (path, width, height, duration) = crate::video_export::export_video_with_annotations(
+            snapshot.path(), &segments, &effects, &annotations, preset).map_err(|e| e.to_string())?;
         // RAII also removes the finished temporary export on import failure.
         let output = tempfile::TempPath::try_from_path(path).map_err(|e| e.to_string())?;
         let exported = {

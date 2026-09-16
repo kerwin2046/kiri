@@ -93,3 +93,5 @@ development.
 - [0034 — Local video trimming and microphone checks](adr/0034-local-video-trimming-and-input-check.md)
 
 - [0035 — Video timeline and timed effects](adr/0035-video-timeline-and-timed-effects.md)
+
+- [0036 — Video annotation tracks and playback controls](adr/0036-video-annotation-tracks-and-playback.md)

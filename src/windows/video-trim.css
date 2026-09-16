@@ -1,5 +1,5 @@
 .kiri-video-player { width:100%; height:100%; display:flex; flex-direction:column; min-height:0; color:var(--kiri-label); font:400 12px var(--kiri-font-ui); }
-.kiri-video-editor-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 56px 14px 20px; border-bottom:1px solid var(--kiri-surface-border); background:var(--kiri-card); }
+.kiri-video-editor-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; flex:none; min-height:54px; box-sizing:border-box; padding:10px 14px 10px 20px; border-bottom:1px solid var(--kiri-surface-border); background:var(--kiri-card); }
 .kiri-video-editor-heading>div { display:flex; align-items:center; gap:16px; min-width:0; }
 .kiri-video-editor-heading strong {font-size:14px; font-weight:650; white-space:nowrap;}
 .kiri-video-editor-heading span {color:var(--kiri-secondary-label); font-size:11px;}
@@ -20,7 +20,6 @@
 .kiri-video-inspector .kiri-video-effect-fields {gap:10px;}
 .kiri-video-inspector .kiri-video-effect-fields label {flex:1;min-width:75px;}
 .kiri-video-inspector .kiri-video-effect-fields input,.kiri-video-inspector .kiri-video-effect-fields select {width:100%;box-sizing:border-box;}
-.kiri-video-edit-entry { position:absolute; top:12px; left:12px; }
 .kiri-video-timeline { flex:none; padding:14px 20px 22px; background:var(--kiri-elevated); border-top:1px solid var(--kiri-surface-border); max-height:55%; overflow:auto; }
 .kiri-video-edit-tools {display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
 .kiri-video-clock {font:500 12px ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;min-width:118px;}
@@ -80,3 +79,29 @@
  .kiri-video-track {height:48px;}
  .kiri-video-trim-handle::after {top:16px;bottom:16px;}
 }
+
+.kiri-video-editor-heading .kiri-video-header-actions {flex:none;gap:10px;}
+
+.kiri-video-lanes {padding-left:94px;}
+.kiri-video-lane-label {position:absolute;left:-94px;top:0;bottom:0;width:82px;display:flex;gap:5px;align-items:center;color:var(--kiri-secondary-label);font-size:10px;pointer-events:none;}
+.kiri-video-lane-label>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kiri-video-effect-tracks {display:grid;gap:4px;margin-top:6px;}
+.kiri-video-effect-track {position:relative;height:32px;background:var(--kiri-group-fill);border-radius:3px;}
+.kiri-video-effect-bar {position:absolute;top:2px;bottom:2px;background:#414141;border:1px solid #777;border-radius:4px;min-width:8px;box-sizing:border-box;}
+.kiri-video-effect-bar[data-selected=true] {background:#565656;border-color:#eee;}
+.kiri-video-effect-bar-body {display:block;width:100%;height:100%;border:0;border-radius:3px;background:transparent;color:#fff;text-align:left;padding:0 10px;overflow:hidden;cursor:grab;touch-action:none;font:500 10px var(--kiri-font-ui);white-space:nowrap;}
+.kiri-video-effect-bar-body:hover:not(:disabled) {background:#ffffff18;}
+.kiri-video-effect-bar-body:disabled {opacity:.5;cursor:default;}
+.kiri-video-effect-time-handle {position:absolute;top:0;bottom:0;width:6px;background:#bbb;cursor:ew-resize;touch-action:none;}
+.kiri-video-effect-time-handle--start {left:0;border-radius:3px 0 0 3px;}
+.kiri-video-effect-time-handle--end {right:0;border-radius:0 3px 3px 0;}
+.kiri-video-effect-time-handle:focus-visible {outline:2px solid #fff;outline-offset:2px;}
+@media(max-width:580px) {.kiri-video-lanes{padding-left:64px;}.kiri-video-lane-label{left:-64px;width:56px;}}
+
+.kiri-video-annotation-editor {position:absolute;inset:0;}
+.kiri-video-annotation-inspector {display:grid;gap:12px;font-size:11px;}
+.kiri-video-annotation-inspector p {color:var(--kiri-secondary-label);line-height:1.6;margin:0;}
+.kiri-video-annotation-inspector label {display:grid;gap:5px;}
+.kiri-video-annotation-inspector input {color:var(--kiri-label);background:var(--kiri-group-fill);border:1px solid var(--kiri-surface-border);padding:6px;border-radius:5px;}
+
+.kiri-video-annotation-toolbar-host {flex:none;position:relative;min-height:44px;background:var(--kiri-card);border-bottom:1px solid var(--kiri-surface-border);}

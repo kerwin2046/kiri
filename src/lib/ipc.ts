@@ -244,8 +244,8 @@ export const api = {
   openAsset: (id: string) => invoke<void>("open_asset", { id }),
   openEditor: (id: string) => invoke<void>("open_editor", { id }),
   revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),
-  exportVideoCopy: (id: string, segments: {start: number; end: number}[], effects: import("../windows/video-effects").VideoEffect[], preset: "original" | "share" | "small") =>
-    invoke<string>("export_video_copy", { id, segments, effects: effects.map(({id: _id, ...effect}) => effect), preset }),
+  exportVideoCopy: (id: string, segments: {start: number; end: number}[], effects: import("../windows/video-effects").VideoEffect[], annotations: import("../windows/video-annotation-render").RasterizedVideoAnnotation[], preset: "original" | "share" | "small") =>
+    invoke<string>("export_video_copy", { id, segments, effects: effects.map(({id: _id, ...effect}) => effect), annotations, preset }),
   convertToGif: (id: string) => invoke<void>("convert_to_gif", { id }),
 
   startCapture: () => invoke<CaptureContextDto>("start_capture"),
