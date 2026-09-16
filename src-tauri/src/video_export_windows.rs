@@ -20,6 +20,27 @@ use windows::{
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
 };
 
+// WinRT rejects forward slashes even though Rust file APIs accept them.
+// Keep UTF-16 intact so paths containing non-ASCII names remain readable.
+fn storage_file(path: &Path) -> Result<StorageFile> {
+    use std::os::windows::ffi::OsStrExt;
+    let absolute = std::path::absolute(path)?;
+    let wide: Vec<u16> = absolute
+        .as_os_str()
+        .encode_wide()
+        .map(|unit| {
+            if unit == b'/' as u16 {
+                b'\\' as u16
+            } else {
+                unit
+            }
+        })
+        .collect();
+    StorageFile::GetFileFromPathAsync(&HSTRING::from_wide(&wide))?
+        .join()
+        .context("could not open native video media file")
+}
+
 fn ticks(seconds: f64) -> i64 {
     (seconds * 10_000_000.0).round() as i64
 }
@@ -39,7 +60,7 @@ pub(super) fn platform_export(
     }
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.context("could not initialize Windows media")?;
     let _apartment = Apartment;
-    let input = StorageFile::GetFileFromPathAsync(&HSTRING::from(source.as_os_str()))?.join()?;
+    let input = storage_file(source)?;
     let properties = input.Properties()?.GetVideoPropertiesAsync()?.join()?;
     let source_clip = MediaClip::CreateFromFileAsync(&input)?.join()?;
     // Use the editor's exact timebase rather than rounded shell metadata duration.
@@ -155,8 +176,7 @@ pub(super) fn platform_export(
                         image::Rgba([0, 0, 0, 255]),
                     )
                     .save(&path)?;
-                    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_os_str()))?
-                        .join()?;
+                    let file = storage_file(&path)?;
                     mask_files.insert(dimensions, file.clone());
                     file
                 };
@@ -182,8 +202,7 @@ pub(super) fn platform_export(
         composition.OverlayLayers()?.Append(&masks)?;
     }
     std::fs::File::create(output)?;
-    let destination =
-        StorageFile::GetFileFromPathAsync(&HSTRING::from(output.as_os_str()))?.join()?;
+    let destination = storage_file(output)?;
     let result = composition
         .RenderToFileWithProfileAsync(&destination, MediaTrimmingPreference::Precise, &profile)?
         .join()?;
@@ -263,6 +282,11 @@ mod tests {
                 .tempdir()?;
             (temporary.path().to_path_buf(), Some(temporary))
         };
+        // Exercise mixed separators and a Unicode name independently of encoding.
+        let path_probe = directory.join("路径-check.txt");
+        std::fs::write(&path_probe, "local test")?;
+        let mixed_path = path_probe.to_string_lossy().replace('\\', "/");
+        storage_file(Path::new(&mixed_path)).context("mixed-separator path regression")?;
         let fixture = MediaComposition::new()?;
         for (index, color) in [[240, 20, 20, 255], [20, 20, 240, 255]]
             .into_iter()
@@ -279,8 +303,7 @@ mod tests {
             }
             let path = directory.join(format!("fixture-{index}.png"));
             bitmap.save(&path)?;
-            let image =
-                StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_os_str()))?.join()?;
+            let image = storage_file(&path)?;
             let clip = MediaClip::CreateFromImageFileAsync(
                 &image,
                 TimeSpan {
@@ -292,8 +315,7 @@ mod tests {
         }
         let source_path = directory.join("source.mp4");
         std::fs::File::create(&source_path)?;
-        let source =
-            StorageFile::GetFileFromPathAsync(&HSTRING::from(source_path.as_os_str()))?.join()?;
+        let source = storage_file(&source_path)?;
         let profile = MediaEncodingProfile::CreateMp4(VideoEncodingQuality::HD720p)?;
         let video = profile.Video()?;
         video.SetWidth(320)?;
@@ -352,8 +374,7 @@ mod tests {
             "unexpected edited duration: {duration}"
         );
         assert!(std::fs::metadata(&output)?.len() > 1000);
-        let exported =
-            StorageFile::GetFileFromPathAsync(&HSTRING::from(output.as_os_str()))?.join()?;
+        let exported = storage_file(&output)?;
         let decoded = MediaComposition::new()?;
         decoded
             .Clips()?
