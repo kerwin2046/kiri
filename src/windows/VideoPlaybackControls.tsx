@@ -8,15 +8,19 @@ import "./video-playback.css";
 function PlaybackSlider({value,max=1,label,onChange,preview=false,onScrubStart,onScrubEnd}:{value:number;max?:number;label:string;onChange:(value:number)=>void;preview?:boolean;onScrubStart?:()=>void;onScrubEnd?:()=>void}) {
   const [hover,setHover]=useState<number|null>(null);
   const [dragging,setDragging]=useState(false);
+  const draggingRef=useRef(false);
   const percent=Math.max(0,Math.min(100,value/(max||1)*100));
+  const pointerValue=(element:HTMLInputElement,x:number)=>{const bounds=element.getBoundingClientRect();return Math.max(0,Math.min(max,(x-bounds.left-6)/Math.max(1,bounds.width-12)*max));};
+  const finishScrub=()=>{if(!draggingRef.current)return;draggingRef.current=false;setDragging(false);setHover(null);onScrubEnd?.();};
   return <div className={`kiri-playback-slider ${preview?"kiri-playback-slider--seek":"kiri-playback-slider--volume"}`} data-dragging={dragging} style={{"--slider-fill":`${percent}%`} as CSSProperties}>
     <div className="kiri-playback-slider-rail"><span/></div>
     {preview&&hover!==null&&max>0&&<output className="kiri-playback-hover-time" style={{left:`clamp(26px, ${hover/max*100}%, calc(100% - 26px))`}}>{videoTimeLabel(hover)}</output>}
     <input type="range" min={0} max={max||1} step={preview?"any":.01} value={Math.min(value,max||1)} disabled={!max} aria-label={label} aria-valuetext={preview?videoTimeLabel(value):`${Math.round(value*100)}%`}
-      onPointerMove={event=>{const bounds=event.currentTarget.getBoundingClientRect();setHover(Math.max(0,Math.min(max,(event.clientX-bounds.left)/bounds.width*max)));}}
+      onPointerMove={event=>{const next=pointerValue(event.currentTarget,event.clientX);setHover(next);if(draggingRef.current)onChange(next);}}
       onPointerLeave={()=>{if(!dragging)setHover(null);}}
-      onPointerDown={event=>{event.currentTarget.setPointerCapture(event.pointerId);setDragging(true);onScrubStart?.();}}
-      onLostPointerCapture={()=>{setDragging(false);setHover(null);onScrubEnd?.();}}
+      onPointerDown={event=>{if(event.button!==0||!max)return;event.preventDefault();event.currentTarget.focus();draggingRef.current=true;setDragging(true);onScrubStart?.();event.currentTarget.setPointerCapture(event.pointerId);onChange(pointerValue(event.currentTarget,event.clientX));}}
+      onPointerUp={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);finishScrub();}}
+      onPointerCancel={finishScrub} onLostPointerCapture={finishScrub}
       onChange={event=>onChange(Number(event.target.value))}/>
   </div>;
 }

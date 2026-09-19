@@ -4,6 +4,28 @@ import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import {createLibraryHarness, nodes} from "./helpers/library-render-harness.mjs";
+
+test("playback scrubbing updates without native range events and ends only once", () => {
+  const source=readFileSync(new URL("../src/windows/VideoPlaybackControls.tsx",import.meta.url),"utf8");
+  const slider=source.slice(source.indexOf("function PlaybackSlider("),source.indexOf("const RATE_KEY"));
+  const harness=createLibraryHarness({},`import React,{useState,useRef} from "react"; const videoTimeLabel=String; ${slider}; export {PlaybackSlider};`);
+  const changes=[];let starts=0,ends=0,captured=false;
+  const component=harness.mount("PlaybackSlider",{value:0,max:10,label:"Seek",preview:true,onChange:value=>changes.push(value),onScrubStart:()=>starts++,onScrubEnd:()=>ends++});
+  const input=nodes(component.render()).find(node=>node?.type==="input");
+  const target={getBoundingClientRect:()=>({left:100,width:212}),focus(){},setPointerCapture(){captured=true;},hasPointerCapture:()=>captured,releasePointerCapture(){captured=false;}};
+  const event=x=>({button:0,pointerId:1,clientX:x,currentTarget:target,preventDefault(){}});
+  input.props.onPointerDown(event(156));
+  input.props.onPointerMove(event(256));
+  input.props.onPointerMove(event(500));
+  input.props.onPointerUp(event(500));
+  input.props.onLostPointerCapture();
+  assert.deepEqual(changes,[2.5,7.5,10]);
+  assert.equal(starts,1);assert.equal(ends,1);assert.equal(captured,false);
+  input.props.onChange({target:{value:"4"}});
+  assert.equal(changes.at(-1),4);
+  component.unmount();
+});
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(repositoryRoot, "src");
