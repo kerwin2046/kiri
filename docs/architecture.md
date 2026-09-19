@@ -426,6 +426,11 @@ The desktop check repeats click and Escape countdown cancellation three times
 each before recording, pausing, resuming and stopping. On failure, its isolated
 runner retains Kiri-specific Windows crash events and minidumps; the matching
 optimized executable and debug symbols are kept separately for diagnosis.
+Kiri carries Wry's upstream Windows controller-teardown fix on the 0.55 series
+required by Tauri 2.11. The parent-window subclass is removed before its
+controller reference is released, preventing nested messages from accessing
+freed controller data. See `src-tauri/vendor/README.md` for provenance and the
+condition for removing this temporary backport.
 
 The explicit microphone check samples the system default input through cpal
 for at most five seconds, sends only device name and levels to the owning
