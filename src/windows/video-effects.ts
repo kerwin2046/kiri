@@ -11,10 +11,11 @@ export type VideoEffect = {
   strength?: number;
   color?: number;
   transition?: number;
+  layer?: number;
 };
 
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-export const effectLabels = {zoom:"Zoom",mask:"Privacy mask",spotlight:"Spotlight",frame:"Crop & background",fade:"Fade in & out"} as const;
+export const effectLabels = {zoom:"Zoom in on a detail",mask:"Hide private information",spotlight:"Highlight an area",frame:"Crop & add space",fade:"Soften the beginning & end"} as const;
 
 const exclusive = (kind:VideoEffect["kind"]) => kind==="zoom"||kind==="frame"||kind==="fade";
 
@@ -123,8 +124,17 @@ export function cropVideoFrame(effect:VideoEffect,ratio:number|null,source:{widt
 export function videoPreviewTransform(effects:VideoEffect[],time:number) {
   let x=0,y=0,sx=1,sy=1;
   let clip={x:0,y:0,width:1,height:1};
-  const active=activeVideoEffects(effects,time),zoom=active.find(e=>e.kind==="zoom"),frame=active.find(e=>e.kind==="frame");
-  if(zoom){const v=videoZoomViewport(zoom,time);sx=1/v.width;sy=1/v.height;x=-v.x*sx;y=-v.y*sy;}
-  if(frame){const r=videoFrameRect(frame),fx=r.width/frame.width,fy=r.height/frame.height;clip=r;x=r.x+(x-frame.x)*fx;y=r.y+(y-frame.y)*fy;sx*=fx;sy*=fy;}
+  const rank=(effect:VideoEffect)=>effect.layer??({zoom:5,frame:6,fade:7,mask:3,spotlight:4}[effect.kind]);
+  const active=activeVideoEffects(effects,time).sort((a,b)=>rank(a)-rank(b));
+  for(const effect of active){
+    let ox=0,oy=0,fx=1,fy=1,crop=clip;
+    if(effect.kind==="zoom"){const v=videoZoomViewport(effect,time);crop=v;fx=1/v.width;fy=1/v.height;ox=-v.x*fx;oy=-v.y*fy;}
+    else if(effect.kind==="frame"){const r=videoFrameRect(effect);crop=effect;fx=r.width/effect.width;fy=r.height/effect.height;ox=r.x-effect.x*fx;oy=r.y-effect.y*fy;}
+    else continue;
+    const left=clamp(ox+Math.max(clip.x,crop.x)*fx,0,1),top=clamp(oy+Math.max(clip.y,crop.y)*fy,0,1);
+    const right=clamp(ox+Math.min(clip.x+clip.width,crop.x+crop.width)*fx,0,1),bottom=clamp(oy+Math.min(clip.y+clip.height,crop.y+crop.height)*fy,0,1);
+    clip={x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)};
+    x=ox+x*fx;y=oy+y*fy;sx*=fx;sy*=fy;
+  }
   return {x,y,sx,sy,clip};
 }

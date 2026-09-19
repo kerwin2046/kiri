@@ -3,22 +3,24 @@ import {MOSAIC_VIEW_BLOCK_SIZE} from "../annotation/model";
 import {clipToMosaicStroke, drawMark, mosaicBlurRadius, type RenderContext} from "../annotation/render";
 
 type Size = {width: number; height: number};
-export type TimedVideoAnnotation = {start: number; end: number; mark: AnnotationMark};
-export type RasterizedVideoAnnotation = {start:number;end:number;x:number;y:number;width:number;height:number;kind:"overlay"|"pixelate"|"blur";imageBase64:string;amount:number};
+export type TimedVideoAnnotation = {start: number; end: number; mark: AnnotationMark;layer?:number};
+export type RasterizedVideoAnnotation = {start:number;end:number;x:number;y:number;width:number;height:number;kind:"overlay"|"pixelate"|"blur";imageBase64:string;amount:number;layer?:number};
 
 function context(ctx:CanvasRenderingContext2D, source:CanvasImageSource, size:Size):RenderContext {
   return {ctx,sourceImage:source,sourceWidth:size.width,sourceHeight:size.height,sourceOffset:{x:0,y:0},regionSize:{x:0,y:0,...size},scaleX:1,scaleY:1,viewScaleX:1,viewScaleY:1,exporting:true};
 }
 
-/** Composite on an already drawn source frame, keeping mosaics behind ink/text. */
-export function renderVideoAnnotations(ctx:CanvasRenderingContext2D, sourceCanvas:HTMLCanvasElement, marks:AnnotationMark[], sourceSize:Size) {
-  ctx.drawImage(sourceCanvas,0,0,sourceSize.width,sourceSize.height);
-  const render = context(ctx,sourceCanvas,sourceSize);
+/** A mosaic samples everything below its track, including lower annotations. */
+export function paintVideoAnnotation(ctx:CanvasRenderingContext2D, mark:AnnotationMark, sourceSize:Size, scratch:HTMLCanvasElement) {
+  if(mark.kind==="mosaic"){
+    if(scratch.width!==sourceSize.width)scratch.width=sourceSize.width;
+    if(scratch.height!==sourceSize.height)scratch.height=sourceSize.height;
+    scratch.getContext("2d")?.drawImage(ctx.canvas,0,0,sourceSize.width,sourceSize.height);
+  }
+  const render = context(ctx,scratch,sourceSize);
   const transform=ctx.getTransform();
   render.filterScale=Math.min(Math.hypot(transform.a,transform.b),Math.hypot(transform.c,transform.d));
-  for (const mark of [...marks.filter(mark=>mark.kind==="mosaic"),...marks.filter(mark=>mark.kind!=="mosaic")]) {
-    ctx.save(); drawMark(mark,render,ctx); ctx.restore();
-  }
+  ctx.save(); drawMark(mark,render,ctx); ctx.restore();
 }
 
 /** Rasterize ink once; mosaic PNGs contain coverage only, never frozen video pixels. */
@@ -30,8 +32,7 @@ export function rasterizeVideoAnnotations(tracks:TimedVideoAnnotation[], sourceS
   if(!ctx) throw new Error("Annotation canvas unavailable");
   const result:RasterizedVideoAnnotation[]=[];
   let decodedBytes=0,encodedBytes=0;
-  const ordered=[...tracks.filter(track=>track.mark.kind==="mosaic"),...tracks.filter(track=>track.mark.kind!=="mosaic")];
-  for(const {start,end,mark} of ordered) {
+  for(const {start,end,mark,layer} of tracks) {
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start) throw new Error("Invalid annotation time range");
     ctx.clearRect(0,0,width,height);
     let kind:RasterizedVideoAnnotation["kind"]="overlay",amount=0;
@@ -58,7 +59,7 @@ export function rasterizeVideoAnnotations(tracks:TimedVideoAnnotation[], sourceS
     cropped.drawImage(canvas,left,top,cropWidth,cropHeight,0,0,crop.width,crop.height);
     const imageBase64=crop.toDataURL("image/png").split(",")[1];encodedBytes+=imageBase64.length;
     if(encodedBytes>64*1024*1024) throw new Error("Annotation images exceed export size limit");
-    result.push({start,end,x:left/width,y:top/height,width:cropWidth/width,height:cropHeight/height,kind,amount,imageBase64});
+    result.push({start,end,x:left/width,y:top/height,width:cropWidth/width,height:cropHeight/height,kind,amount,imageBase64,layer});
   }
   return result;
 }

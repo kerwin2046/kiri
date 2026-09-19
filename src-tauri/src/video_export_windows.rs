@@ -632,6 +632,7 @@ mod tests {
             &[],
             &[
                 PreparedVideoAnnotation {
+                    layer: -1,
                     start: 0.75,
                     end: 1.25,
                     x: 0.7,
@@ -643,6 +644,7 @@ mod tests {
                     amount: 0.0,
                 },
                 PreparedVideoAnnotation {
+                    layer: -1,
                     start: 0.5,
                     end: 3.5,
                     x: 0.625,
@@ -654,6 +656,7 @@ mod tests {
                     amount: 0.125,
                 },
                 PreparedVideoAnnotation {
+                    layer: -1,
                     start: 0.5,
                     end: 3.5,
                     x: 20.0 / 320.0,

@@ -79,6 +79,8 @@ interface Props {
   onDocumentChange?(marks: AnnotationMark[]): void;
   /** Let a video compositor present live drafts through the same effects as export. */
   onFrame?(canvas: HTMLCanvasElement): void;
+  /** Video draws marks in its own layer stack; this canvas keeps hit targets and handles. */
+  onLiveMarks?(marks: AnnotationMark[], draft: AnnotationMark | null, editingId: number | null): void;
   onUndo?(): void;
   onRedo?(): void;
   /** CSS viewport size; document coordinates remain fixed to canvas/region. */
@@ -128,6 +130,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       onSelectionChange,
       onDocumentChange,
       onFrame,
+      onLiveMarks,
       onUndo,
       onRedo,
       viewSize,
@@ -320,7 +323,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         brushDiameter: appearanceRef.current.mosaicBrushDiameter,
         selectedIndex: editing ? null : selectedIndex,
         editingIndex: editing ? editing.index : null,
+        chromeOnly: !!onLiveMarks,
       });
+      onLiveMarks?.(marks, draft, editing?.index != null ? marks[editing.index]?.id ?? null : null);
       onFrame?.(canvas);
     }, [
       marks,
@@ -339,6 +344,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       displaySize,
       getSourceImage,
       onFrame,
+      onLiveMarks,
     ]);
 
     useEffect(() => {

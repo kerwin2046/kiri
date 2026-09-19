@@ -10,6 +10,7 @@ import "./VideoAnnotationsEditor.css";
 import {useAnnotationAppearance} from "../annotation/useAnnotationAppearance";
 
 export type VideoAnnotationsEditorProps={
+  onLiveMarks?(marks:AnnotationMark[],draft:AnnotationMark|null,editingId:number|null):void;
   onFrame?(canvas:HTMLCanvasElement):void;active:boolean;onActivate():void;extraTools?:ReactNode;image:HTMLImageElement|null;sourceSize:{width:number;height:number};viewSize:{width:number;height:number};
   marks:AnnotationMark[];revision:number;toolbarHost?:HTMLElement|null;appearanceHost?:HTMLElement|null;selectedMarkId?:number|null;onSelectionChange?(markId:number|null):void;disabled:boolean;
   onCommitReady?(commit:(()=>void)|null):void;
@@ -72,7 +73,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
     {props.toolbarHost?createPortal(toolbar,props.toolbarHost):toolbar}
     {props.appearanceHost&&createPortal(appearanceControls,props.appearanceHost)}
     {props.active&&<div className="kiri-video-annotation-surface" style={{width:props.viewSize.width,height:props.viewSize.height}}>
-      <AnnotationCanvas ref={canvas} onFrame={props.onFrame} image={props.image} region={{x:0,y:0,...props.sourceSize}} viewSize={props.viewSize}
+      <AnnotationCanvas ref={canvas} onLiveMarks={props.onLiveMarks} onFrame={props.onFrame} image={props.image} region={{x:0,y:0,...props.sourceSize}} viewSize={props.viewSize}
         initialDocument={{schemaVersion:1,canvas:props.sourceSize,sourcePixels:props.sourceSize,marks:props.marks}} documentRevision={props.revision} selectedMarkId={props.selectedMarkId} onSelectionChange={props.onSelectionChange}
         interactionDisabled={props.disabled} tool={tool} appearance={scaled} onHistoryChange={noop} onDocumentChange={props.onChange} onUndo={props.onUndo} onRedo={props.onRedo} onCancel={props.onClose}/>
     </div>}

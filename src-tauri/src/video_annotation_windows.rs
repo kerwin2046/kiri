@@ -1,6 +1,6 @@
 //! Bounded-memory, timestamp-preserving native annotation prepass.
 use super::super::{
-    PreparedVideoAnnotation, VideoAnnotationKind, VideoEffect, VideoEffectKind, VideoMaskStyle,
+    composition_order, PreparedVideoAnnotation, VideoAnnotationKind, VideoEffect, VideoEffectKind, VideoMaskStyle,
 };
 use anyhow::{bail, Context, Result};
 use image::{imageops, RgbaImage};
@@ -17,6 +17,7 @@ pub(super) fn render(
     effects: &[VideoEffect],
     profile: &MediaEncodingProfile,
 ) -> Result<()> {
+    let order = composition_order(effects, annotations);
     // Reader owns the Media Foundation startup guard until writer resources drop.
     let reader = crate::gif::WindowsVideoReader::open(source)?;
     let (width, height) = reader.dimensions();
@@ -107,8 +108,7 @@ pub(super) fn render(
                             interval[1]
                         };
                         let mut frame = pending.1.clone();
-                        paint(&mut frame, timestamp, annotations)?;
-                        paint_effects(&mut frame, timestamp, effects)?;
+                        paint_layers(&mut frame, timestamp, annotations, effects, &order)?;
                         write_frame(&writer, stream, &frame, timestamp, next - timestamp)?;
                         timestamp = next;
                     }
@@ -165,6 +165,17 @@ pub(super) fn write_frame(
         sample.SetSampleTime(timestamp)?;
         sample.SetSampleDuration(duration)?;
         writer.WriteSample(stream, &sample)?;
+    }
+    Ok(())
+}
+
+fn paint_layers(frame: &mut RgbaImage, time: i64, annotations: &[PreparedVideoAnnotation], effects: &[VideoEffect], order: &[usize]) -> Result<()> {
+    for &index in order {
+        if index < annotations.len() {
+            paint(frame, time, std::slice::from_ref(&annotations[index]))?;
+        } else {
+            paint_effects(frame, time, std::slice::from_ref(&effects[index - annotations.len()]))?;
+        }
     }
     Ok(())
 }
@@ -429,6 +440,23 @@ fn paint_effects(frame: &mut RgbaImage, timestamp: i64, effects: &[VideoEffect])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layers_above_a_mask_remain_visible_and_layers_below_are_covered() {
+        let mask = VideoEffect { kind: VideoEffectKind::Mask, start: 0.5, end: 1.5,
+            x: 0.25, y: 0.25, width: 0.5, height: 0.5, layer: 2, ..Default::default() };
+        for layer in [1, 3] {
+            let overlay = PreparedVideoAnnotation { layer, start: 0.5, end: 1.5,
+                x: 0.25, y: 0.25, width: 0.5, height: 0.5, kind: VideoAnnotationKind::Overlay,
+                image: RgbaImage::from_pixel(4, 4, image::Rgba([0, 0, 255, 255])), amount: 0.0 };
+            let annotations = [overlay];
+            let order = composition_order(&[mask], &annotations);
+            let mut frame = RgbaImage::from_pixel(96, 64, image::Rgba([255, 0, 0, 255]));
+            paint_layers(&mut frame, 10_000_000, &annotations, &[mask], &order).unwrap();
+            assert_eq!(frame.get_pixel(48, 32).0, if layer == 3 {[0, 0, 255, 255]} else {[0, 0, 0, 255]});
+            assert_eq!(frame.get_pixel(5, 5).0, [255, 0, 0, 255]);
+        }
+    }
 
     #[test]
     fn presentation_effect_pixels_respect_bounds_background_and_fade() {

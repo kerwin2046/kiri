@@ -377,11 +377,15 @@ export function renderAll(
     brushDiameter?: number;
     selectedIndex?: number | null;
     editingIndex?: number | null;
+    chromeOnly?: boolean;
   } = {},
 ) {
   const { ctx } = r;
   const region = { x: 0, y: 0, width: r.regionSize.width, height: r.regionSize.height };
 
+  if(options.chromeOnly){
+    ctx.clearRect(0,0,region.width,region.height);
+  }else{
   ctx.fillStyle = "#141414";
   if (r.exporting) {
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -429,6 +433,7 @@ export function renderAll(
     drawMark(mark, r, ctx);
   }
   if (options.draft) drawMark(options.draft, r, ctx);
+  }
 
   if (!r.exporting && options.brushCursor && options.brushDiameter) {
     drawBrushCursor(

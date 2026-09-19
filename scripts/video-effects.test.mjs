@@ -137,3 +137,38 @@ test("portrait crop and background preserve aspect, and pointer transform follow
  // A preview drag maps back to the same source displacement.
  assert.ok(Math.abs((.1/tr.sx)*tr.sx-.1)<1e-10);
 });
+
+const layerSource=readFileSync(new URL('../src/windows/video-layers.ts',import.meta.url),'utf8');
+const layerCompiled=ts.transpileModule(layerSource,{compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.ESNext}}).outputText;
+const {orderedVideoLayers,moveVideoLayer,retimeVideoLayer}=await import(`data:text/javascript;base64,${Buffer.from(layerCompiled).toString('base64')}`);
+
+test('track order changes the overlay stack, preserves timing and keeps whole-picture adjustments separate',()=>{
+ const items=[{id:'ink',mark:{kind:'rectangle'},layer:1,start:1,end:3},{id:'mask',kind:'mask',layer:2,start:0,end:4},{id:'zoom',kind:'zoom',layer:3,start:1,end:3}];
+ assert.deepEqual(orderedVideoLayers(items).map(item=>item.id),['ink','mask','zoom']);
+ const raised=moveVideoLayer(items,'ink','mask');
+ assert.deepEqual(orderedVideoLayers(raised).map(item=>item.id),['mask','ink','zoom']);
+ assert.deepEqual(raised.map(({start,end})=>[start,end]),items.map(({start,end})=>[start,end]));
+ assert.equal(moveVideoLayer(items,'ink','zoom'),items);
+ assert.equal(moveVideoLayer(items,'mask','ink'),items);
+ assert.deepEqual(orderedVideoLayers(moveVideoLayer(raised,'ink',null)).map(item=>item.id),['ink','mask','zoom']);
+});
+
+test('time drags clamp at limits instead of ignoring overshooting edges',()=>{
+ const mask={...createVideoEffect('mask',2,10,[]),end:5};
+ assert.deepEqual([retimeVideoLayer(mask,'start',100,[],10).start,retimeVideoLayer(mask,'end',-100,[],10).end],[4.95,2.05]);
+ assert.deepEqual([retimeVideoLayer(mask,'move',100,[],10).start,retimeVideoLayer(mask,'move',-100,[],10).end],[7,3]);
+ const zoom={...mask,kind:'zoom',width:.5,height:.5};
+ const others=[{...zoom,id:'left',start:0,end:1},{...zoom,id:'right',start:6,end:8}];
+ assert.equal(retimeVideoLayer(zoom,'end',100,others,10).end,6);
+ assert.equal(retimeVideoLayer(zoom,'move',-100,others,10).start,1);
+});
+
+test('reordered camera adjustments update both image mapping and visible crop bounds',()=>{
+ const zoom={...createVideoEffect('zoom',0,5,[]),transition:0,layer:1};
+ const frame={...cropVideoFrame(createVideoEffect('frame',0,5,[]),9/16,{width:1600,height:900}),layer:2};
+ const normal=videoPreviewTransform([frame,zoom],1),bounds=videoFrameRect(frame);
+ for(const key of ['x','y','width','height'])assert.ok(Math.abs(normal.clip[key]-bounds[key])<1e-9);
+ const reversed=videoPreviewTransform([{...frame,layer:0},zoom],1);
+ assert.notDeepEqual(normal,reversed);
+ assert.ok(Math.abs(reversed.x+.5*reversed.sx-.5)<1e-9);
+});

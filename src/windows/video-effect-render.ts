@@ -1,4 +1,5 @@
 import {videoEffectEnvelope,videoFrameRect,videoZoomViewport,type VideoEffect} from "./video-effects";
+import {orderedVideoLayers} from "./video-layers";
 
 /** Masks cover annotations too, matching native composition before zoom. */
 export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect[],scratch:HTMLCanvasElement) {
@@ -38,8 +39,12 @@ export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect
   }
 }
 
-/** Ordered identically in the platform encoders: mask, spotlight, zoom, frame, fade. */
+/** Each stack uses the same explicit order as the platform encoders. */
 export function paintVideoEffects(ctx:CanvasRenderingContext2D,effects:VideoEffect[],time:number,scratch:HTMLCanvasElement) {
+  for(const effect of orderedVideoLayers(effects))paintVideoEffect(ctx,effect,time,scratch);
+}
+export function paintVideoEffect(ctx:CanvasRenderingContext2D,effect:VideoEffect,time:number,scratch:HTMLCanvasElement) {
+  const effects=[effect];
   paintVideoMasks(ctx,effects,scratch);
   const {width,height}=ctx.canvas,sample=scratch.getContext("2d");if(!sample)return;
   for(const effect of effects.filter(e=>e.kind==="spotlight")){

@@ -10,6 +10,7 @@ typedef struct {
     unsigned maskStyle;
     double strength, transition;
     unsigned color;
+    int layer;
 } KiriVideoEffect;
 typedef struct {
     unsigned kind;
@@ -28,7 +29,7 @@ static CIImage *KiriPlacedAnnotation(CIImage *image, KiriVideoAnnotation annotat
 
 // Called only on a background worker; the source is immutable and output is staging.
 bool kiri_export_video(const char *source, const char *output, const KiriVideoSegment *segments,
-                       size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, unsigned maxEdge, char *error, size_t capacity) {
+                       size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, const size_t *order, size_t orderCount, unsigned maxEdge, char *error, size_t capacity) {
     @autoreleasepool {
         @try {
 #pragma clang diagnostic push
@@ -140,7 +141,10 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     CIImage *image = request.sourceImage;
                     CGRect extent = image.extent;
                     // CI coordinates are bottom-left; UI rectangles are normalized top-left.
-                    for (size_t index = 0; index < annotationCount; index++) {
+                    // Visit one layer at a time in the explicit timeline order.
+                    for (size_t position = 0; position < orderCount; position++) {
+                        size_t item = order[position];
+                    for (size_t index = item; index < MIN(item + 1, annotationCount); index++) {
                         KiriVideoAnnotation annotation = annotations[index];
                         if (annotation.kind == 0 || sourceTime < annotation.start || sourceTime >= annotation.end) continue;
                         CIImage *mask = KiriPlacedAnnotation(annotationImages[index], annotation, extent);
@@ -154,13 +158,13 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         image = [processed imageByApplyingFilter:@"CIBlendWithAlphaMask" withInputParameters:@{
                             kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: mask}];
                     }
-                    for (size_t index = 0; index < annotationCount; index++) {
+                    for (size_t index = item; index < MIN(item + 1, annotationCount); index++) {
                         KiriVideoAnnotation annotation = annotations[index];
                         if (annotation.kind != 0 || sourceTime < annotation.start || sourceTime >= annotation.end) continue;
                         CIImage *overlay = KiriPlacedAnnotation(annotationImages[index], annotation, extent);
                         image = [overlay imageByCompositingOverImage:image];
                     }
-                    for (size_t index = 0; index < effectCount; index++) {
+                    for (size_t index = item >= annotationCount ? item - annotationCount : effectCount; index < effectCount && index == item - annotationCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 1 || sourceTime < effect.start || sourceTime >= effect.end) continue;
                         CGRect mask = CGRectMake(extent.origin.x + effect.x * extent.size.width,
@@ -183,7 +187,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                             image = [processed imageByCompositingOverImage:image];
                         }
                     }
-                    for (size_t index = 0; index < effectCount; index++) {
+                    for (size_t index = item >= annotationCount ? item - annotationCount : effectCount; index < effectCount && index == item - annotationCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 2 || sourceTime < effect.start || sourceTime >= effect.end) continue;
                         CGRect focus = CGRectIntegral(CGRectMake(extent.origin.x + effect.x * extent.size.width,
@@ -193,7 +197,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         CIImage *shade = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:effect.strength]] imageByCroppingToRect:extent];
                         image = [original imageByCompositingOverImage:[shade imageByCompositingOverImage:image]];
                     }
-                    for (size_t index = 0; index < effectCount; index++) {
+                    for (size_t index = item >= annotationCount ? item - annotationCount : effectCount; index < effectCount && index == item - annotationCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 0 || sourceTime < effect.start || sourceTime >= effect.end) continue;
                         double ease = 1;
@@ -214,7 +218,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         image = [image imageByApplyingTransform:CGAffineTransformMakeScale(extent.size.width / crop.size.width, extent.size.height / crop.size.height)];
                         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(extent.origin.x, extent.origin.y)];
                     }
-                    for (size_t index = 0; index < effectCount; index++) {
+                    for (size_t index = item >= annotationCount ? item - annotationCount : effectCount; index < effectCount && index == item - annotationCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (sourceTime < effect.start || sourceTime >= effect.end) continue;
                         if (effect.kind == 3) {
@@ -232,7 +236,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                             image = [content imageByCompositingOverImage:[[CIImage imageWithColor:color] imageByCroppingToRect:extent]];
                         }
                     }
-                    for (size_t index = 0; index < effectCount; index++) {
+                    for (size_t index = item >= annotationCount ? item - annotationCount : effectCount; index < effectCount && index == item - annotationCount; index++) {
                         KiriVideoEffect effect = effects[index];
                         if (effect.kind != 4 || sourceTime < effect.start || sourceTime >= effect.end) continue;
                         double ramp = MIN(effect.transition, (effect.end - effect.start) / 2);
@@ -241,6 +245,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         CIColor *color = [CIColor colorWithRed:((effect.color >> 16) & 255) / 255.0
                             green:((effect.color >> 8) & 255) / 255.0 blue:(effect.color & 255) / 255.0 alpha:alpha];
                         image = [[[CIImage imageWithColor:color] imageByCroppingToRect:extent] imageByCompositingOverImage:image];
+                    }
                     }
                     image = [image imageByCroppingToRect:extent];
                     if (target.width != extent.size.width || target.height != extent.size.height) {

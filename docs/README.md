@@ -97,3 +97,4 @@ development.
 - [0036 — Video annotation tracks and playback controls](adr/0036-video-annotation-tracks-and-playback.md)
 
 - [0041 — Single-canvas video editing](adr/0041-single-canvas-video-editing.md)
+- [0042 — Readable tools and explicit layer order](adr/0042-readable-tools-and-layer-order.md)

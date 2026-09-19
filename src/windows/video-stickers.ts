@@ -1,5 +1,5 @@
 import type {RasterizedVideoAnnotation} from "./video-annotation-render";
-export type VideoSticker={id:string;start:number;end:number;x:number;y:number;width:number;height:number;dataUrl:string};
+export type VideoSticker={id:string;start:number;end:number;x:number;y:number;width:number;height:number;dataUrl:string;layer?:number};
 export async function importVideoSticker(file:File):Promise<{dataUrl:string;image:HTMLImageElement}>{
   if(!["image/png","image/jpeg","image/webp"].includes(file.type)||file.size>10*1024*1024)throw Error("Unsupported sticker");
   const url=URL.createObjectURL(file);
@@ -14,5 +14,5 @@ export async function importVideoSticker(file:File):Promise<{dataUrl:string;imag
   }finally{URL.revokeObjectURL(url);}
 }
 export function rasterizeVideoStickers(stickers:VideoSticker[]):RasterizedVideoAnnotation[]{
-  return stickers.map(({start,end,x,y,width,height,dataUrl})=>({start,end,x,y,width,height,kind:"overlay",imageBase64:dataUrl.split(",")[1],amount:0}));
+  return stickers.map(({start,end,x,y,width,height,dataUrl,layer})=>({start,end,x,y,width,height,kind:"overlay",imageBase64:dataUrl.split(",")[1],amount:0,layer}));
 }

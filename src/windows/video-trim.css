@@ -175,10 +175,41 @@
 
 
 .kiri-video-surface {overflow:hidden;}
-.kiri-video-annotation-editor .annotation-canvas-root>canvas {opacity:0;}
 .kiri-video-clip-select[data-reorderable=false] {cursor:ew-resize;}
 .kiri-video-ruler input {touch-action:none;}
 .kiri-video-playhead>span::before {content:"";position:absolute;inset:-5px;}
 .kiri-video-editor-heading {position:relative;z-index:20;}
 
 .kiri-video-clip-select:active:not(:disabled),.kiri-video-effect-bar-body:active:not(:disabled) {transform:none;}
+
+/* The grip controls layer order; the bar and its wide edges control time. */
+.kiri-video-lanes {padding-left:126px;}
+.kiri-video-lane-label {left:-126px;width:116px;}
+.kiri-video-track-group {position:relative;display:grid;gap:5px;}
+.kiri-video-track-group-heading {display:flex;align-items:center;gap:14px;min-height:24px;color:var(--kiri-secondary-label);font-size:10px;margin-left:-126px;}
+.kiri-video-track-group-heading>span {width:112px;flex:none;}.kiri-video-track-group-heading small {font-size:10px;opacity:.8;}
+.kiri-video-effect-track {height:34px;}
+.kiri-video-effect-track[data-selected=true] {background:#ffffff09;}
+.kiri-video-layer-label {position:absolute;left:-126px;top:0;bottom:0;width:118px;display:flex;align-items:center;gap:5px;border:0;border-radius:4px;padding:0 4px;color:var(--kiri-secondary-label);background:transparent;font:11px var(--kiri-font-ui);text-align:left;cursor:grab;touch-action:none;}
+.kiri-video-layer-label>svg {flex:none;}.kiri-video-layer-label>svg:first-child {color:#777;}.kiri-video-layer-label>span {overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.kiri-video-layer-label:hover:not(:disabled),.kiri-video-effect-track[data-selected=true] .kiri-video-layer-label {color:var(--kiri-label);background:var(--kiri-group-fill);}
+.kiri-video-layer-label:active {cursor:grabbing;transform:none!important;}.kiri-video-layer-label:focus-visible {outline:1px solid var(--kiri-label);outline-offset:-1px;}
+.kiri-video-effect-track[data-dragging=true] {opacity:.4;}
+.kiri-video-effect-track[data-drop-before=true]::before,.kiri-video-layer-drop-end {content:"";position:absolute;top:-3px;left:-126px;right:0;height:2px;background:var(--kiri-label);z-index:9;pointer-events:none;}
+.kiri-video-layer-drop-end {top:auto;bottom:-3px;}
+.kiri-video-effect-bar-body {display:flex;align-items:center;gap:8px;padding:0 15px;}.kiri-video-effect-bar-body>span {overflow:hidden;text-overflow:ellipsis;}.kiri-video-effect-bar-body>small {font-size:9px;opacity:.7;margin-left:auto;}
+.kiri-video-effect-bar-body:active {cursor:grabbing;}
+.kiri-video-effect-time-handle {width:10px;background:#a4a4a4;}.kiri-video-effect-time-handle::after {content:"";position:absolute;top:8px;bottom:8px;left:4px;width:2px;border-radius:1px;background:#333;}
+.kiri-video-effect-bar[data-selected=true] .kiri-video-effect-time-handle {background:#eee;}
+.kiri-video-layer-playhead {position:absolute;top:0;bottom:0;width:1px;background:#ffffff55;pointer-events:none;}
+.kiri-video-track-help {display:flex;gap:16px;align-items:center;font-size:10px;white-space:normal;}.kiri-video-track-help>strong {font-weight:500;color:var(--kiri-label);white-space:nowrap;}.kiri-video-track-help>span {line-height:1.5;}
+.kiri-video-effect-tool {display:flex;align-items:center;gap:6px;color:var(--kiri-label);border:0;border-left:1px solid var(--kiri-surface-border);margin-left:7px;padding:0 10px;background:transparent;font:11px var(--kiri-font-ui);height:26px;cursor:pointer;white-space:nowrap;}
+.kiri-video-annotation-editor .annotation-canvas-root>canvas {opacity:1;}
+@media(max-width:700px){
+ .kiri-video-lanes {padding-left:104px;}.kiri-video-lane-label {left:-104px;width:94px;}
+ .kiri-video-layer-label {left:-104px;width:98px;font-size:10px;gap:4px;}.kiri-video-layer-label>svg:nth-child(2) {display:none;}
+ .kiri-video-track-group-heading {margin-left:-104px;}.kiri-video-track-group-heading>span {width:90px;}
+ .kiri-video-effect-track[data-drop-before=true]::before,.kiri-video-layer-drop-end {left:-104px;}
+}
+.kiri-video-effect-tool:hover:not(:disabled) {background:var(--kiri-group-fill);}.kiri-video-effect-tool:disabled,.kiri-video-layer-label:disabled {opacity:.4;cursor:default;}
+.kiri-video-effect-tool:focus-visible {outline:1px solid var(--kiri-label);outline-offset:-1px;}

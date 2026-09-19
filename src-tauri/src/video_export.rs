@@ -67,6 +67,8 @@ fn default_effect_strength() -> f64 {
     0.5
 }
 
+fn default_layer() -> i32 { -1 }
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +88,8 @@ pub struct VideoEffect {
     pub transition: f64,
     #[serde(default)]
     pub color: u32,
+    #[serde(default = "default_layer")]
+    pub layer: i32,
 }
 
 impl Default for VideoEffect {
@@ -102,6 +106,7 @@ impl Default for VideoEffect {
             strength: default_effect_strength(),
             transition: 0.0,
             color: 0,
+            layer: default_layer(),
         }
     }
 }
@@ -127,6 +132,8 @@ pub struct VideoAnnotation {
     pub kind: VideoAnnotationKind,
     pub image_base64: String,
     pub amount: f64,
+    #[serde(default = "default_layer")]
+    pub layer: i32,
 }
 
 pub(super) struct PreparedVideoAnnotation {
@@ -139,6 +146,23 @@ pub(super) struct PreparedVideoAnnotation {
     pub kind: VideoAnnotationKind,
     pub image: image::RgbaImage,
     pub amount: f64,
+    pub layer: i32,
+}
+
+/// Overlay tracks composite back to front, then whole-picture adjustments.
+/// Omitted order fields retain the historical rendering of older callers.
+pub(super) fn composition_order(effects: &[VideoEffect], annotations: &[PreparedVideoAnnotation]) -> Vec<usize> {
+    let mut layers: Vec<_> = annotations.iter().enumerate().map(|(index, a)| {
+        (0, if a.layer >= 0 {a.layer} else if a.kind == VideoAnnotationKind::Overlay {1} else {0}, index)
+    }).chain(effects.iter().enumerate().map(|(index, effect)| {
+        let (group, fallback) = match effect.kind {
+            VideoEffectKind::Mask => (0, 3), VideoEffectKind::Spotlight => (0, 4),
+            VideoEffectKind::Zoom => (1, 5), VideoEffectKind::Frame => (1, 6), VideoEffectKind::Fade => (1, 7),
+        };
+        (group, if effect.layer >= 0 {effect.layer} else {fallback}, annotations.len() + index)
+    })).collect();
+    layers.sort_by_key(|&(group, order, index)| (group, order, index));
+    layers.into_iter().map(|(_, _, index)| index).collect()
 }
 
 fn prepare_annotations(annotations: &[VideoAnnotation]) -> Result<Vec<PreparedVideoAnnotation>> {
@@ -224,6 +248,7 @@ fn prepare_annotations(annotations: &[VideoAnnotation]) -> Result<Vec<PreparedVi
                 amount,
                 kind: annotation.kind,
                 image,
+                layer: annotation.layer,
             })
         })
         .collect()
@@ -424,6 +449,7 @@ fn platform_export(
             pixel_height: annotation.image.height(),
         })
         .collect();
+    let order = composition_order(effects, annotations);
     unsafe extern "C" {
         fn kiri_export_video(
             source: *const c_char,
@@ -434,6 +460,8 @@ fn platform_export(
             effect_count: usize,
             annotations: *const NativeAnnotation,
             annotation_count: usize,
+            order: *const usize,
+            order_count: usize,
             max_edge: u32,
             error: *mut c_char,
             capacity: usize,
@@ -457,6 +485,8 @@ fn platform_export(
             effects.len(),
             native_annotations.as_ptr(),
             native_annotations.len(),
+            order.as_ptr(),
+            order.len(),
             preset.max_edge(),
             error.as_mut_ptr(),
             error.len(),
@@ -648,6 +678,7 @@ mod tests {
             ..Default::default()
         }];
         let annotations = [VideoAnnotation {
+            layer: -1,
             start: 0.25,
             end: 0.5,
             x: 0.0,
@@ -918,6 +949,33 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn native_layer_reordering_changes_mask_and_annotation_occlusion() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("layer-order.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 96, 64, 30, 1_000_000, false).unwrap();
+        let pixels: Vec<u8> = [0, 0, 255, 255].repeat(96 * 64);
+        for index in 0..60 { assert!(encoder.append_video(&pixels, index).unwrap()); }
+        encoder.finish().unwrap();
+        let mask = VideoEffect { kind: VideoEffectKind::Mask, start: 0.5, end: 1.5,
+            x: 0.25, y: 0.25, width: 0.5, height: 0.5, layer: 2, ..Default::default() };
+        for (layer, expected_channel) in [(1, None), (3, Some(2))] {
+            let overlay = VideoAnnotation { layer, start: 0.5, end: 1.5,
+                x: 0.25, y: 0.25, width: 0.5, height: 0.5, kind: VideoAnnotationKind::Overlay,
+                image_base64: annotation_png(image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 0, 255, 255]))), amount: 0.0 };
+            let (output, _, _, _) = export_video_with_annotations(&source,
+                &[VideoSegment {start: 0.0, end: 2.0, speed: 1.0}], &[mask], &[overlay], VideoExportPreset::Original).unwrap();
+            let frame = frame_at_with_edge(&output, 1.0, 96);
+            let pixel = frame.get_pixel(48, 32);
+            if let Some(channel) = expected_channel { assert!(pixel[channel] > 200, "upper annotation missing: {pixel:?}"); }
+            else { assert!(pixel.0[..3].iter().all(|channel| *channel < 30), "lower annotation escaped mask: {pixel:?}"); }
+            assert!(frame_at_with_edge(&output, 1.8, 96).get_pixel(48, 32)[0] > 200);
+            std::fs::remove_file(output).unwrap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn native_spotlight_frame_and_fade_follow_live_source_and_timing() {
         use crate::macos_media::MacosSegmentEncoder;
         let directory = tempfile::tempdir().unwrap();
@@ -1077,6 +1135,7 @@ mod tests {
     #[test]
     fn annotation_payload_limits_and_geometry_are_validated() {
         let annotation = VideoAnnotation {
+            layer: -1,
             start: 0.0,
             end: 1.0,
             x: 0.0,
@@ -1172,6 +1231,7 @@ mod tests {
         for kind in [VideoAnnotationKind::Pixelate, VideoAnnotationKind::Blur] {
             let annotations = [
                 VideoAnnotation {
+                    layer: -1,
                     start: 0.5,
                     end: 2.5,
                     x: 0.0,
@@ -1183,6 +1243,7 @@ mod tests {
                     image_base64: coverage.clone(),
                 },
                 VideoAnnotation {
+                    layer: -1,
                     start: 1.0,
                     end: 2.0,
                     x: 0.5,
@@ -1304,6 +1365,7 @@ mod tests {
                 "recording must tag BT.709 primaries, transfer and YCbCr matrix"
             );
             let annotation = VideoAnnotation {
+                layer: -1,
                 start: 0.0,
                 end: 0.2,
                 x: 0.0,
