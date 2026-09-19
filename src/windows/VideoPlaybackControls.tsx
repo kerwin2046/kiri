@@ -1,9 +1,25 @@
-import {useEffect, useRef, useState, type RefObject} from "react";
+import {useEffect, useRef, useState, type CSSProperties, type RefObject} from "react";
 import {Play, Pause, Volume2, VolumeX, Maximize, Minimize, Check} from "lucide-react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {t} from "../i18n";
 import {videoTimeLabel} from "./video-trim.js";
 import "./video-playback.css";
+
+function PlaybackSlider({value,max=1,label,onChange,preview=false,onScrubStart,onScrubEnd}:{value:number;max?:number;label:string;onChange:(value:number)=>void;preview?:boolean;onScrubStart?:()=>void;onScrubEnd?:()=>void}) {
+  const [hover,setHover]=useState<number|null>(null);
+  const [dragging,setDragging]=useState(false);
+  const percent=Math.max(0,Math.min(100,value/(max||1)*100));
+  return <div className={`kiri-playback-slider ${preview?"kiri-playback-slider--seek":"kiri-playback-slider--volume"}`} data-dragging={dragging} style={{"--slider-fill":`${percent}%`} as CSSProperties}>
+    <div className="kiri-playback-slider-rail"><span/></div>
+    {preview&&hover!==null&&max>0&&<output className="kiri-playback-hover-time" style={{left:`clamp(26px, ${hover/max*100}%, calc(100% - 26px))`}}>{videoTimeLabel(hover)}</output>}
+    <input type="range" min={0} max={max||1} step={preview?"any":.01} value={Math.min(value,max||1)} disabled={!max} aria-label={label} aria-valuetext={preview?videoTimeLabel(value):`${Math.round(value*100)}%`}
+      onPointerMove={event=>{const bounds=event.currentTarget.getBoundingClientRect();setHover(Math.max(0,Math.min(max,(event.clientX-bounds.left)/bounds.width*max)));}}
+      onPointerLeave={()=>{if(!dragging)setHover(null);}}
+      onPointerDown={event=>{event.currentTarget.setPointerCapture(event.pointerId);setDragging(true);onScrubStart?.();}}
+      onLostPointerCapture={()=>{setDragging(false);setHover(null);onScrubEnd?.();}}
+      onChange={event=>onChange(Number(event.target.value))}/>
+  </div>;
+}
 
 const RATE_KEY = "kiri.video.playback-rate";
 function savedRate() {
@@ -16,6 +32,7 @@ export function VideoPlaybackControls({video}: {video: RefObject<HTMLVideoElemen
   const [volume,setVolume]=useState(1), [muted,setMuted]=useState(false), [rate,setRate]=useState(savedRate);
   const [open,setOpen]=useState(false), [draft,setDraft]=useState(String(rate)), [fullscreen,setFullscreen]=useState(false);
   const panel=useRef<HTMLDivElement>(null), speedButton=useRef<HTMLButtonElement>(null), input=useRef<HTMLInputElement>(null);
+  const resumeAfterScrub=useRef(false);
   const valid=Number.isFinite(Number(draft))&&Number(draft)>=.1&&Number(draft)<=8;
   useEffect(()=>{
     const player=video.current; if(!player) return;
@@ -25,9 +42,13 @@ export function VideoPlaybackControls({video}: {video: RefObject<HTMLVideoElemen
       setDuration(Number.isFinite(player.duration)?player.duration:0);
       setVolume(player.volume);setMuted(player.muted);setRate(player.playbackRate);
     };
+    let frame=0;
+    const tick=()=>{setTime(player.currentTime);if(!player.paused)frame=requestAnimationFrame(tick);};
+    const start=()=>{cancelAnimationFrame(frame);tick();};
+    player.addEventListener("play",start);if(!player.paused)start();
     const events=["timeupdate","loadedmetadata","play","pause","ended","volumechange","ratechange"];
     events.forEach(name=>player.addEventListener(name,sync));sync();
-    return()=>events.forEach(name=>player.removeEventListener(name,sync));
+    return()=>{cancelAnimationFrame(frame);player.removeEventListener("play",start);events.forEach(name=>player.removeEventListener(name,sync));};
   },[video]);
   useEffect(()=>{
     if(!open)return;
@@ -63,17 +84,19 @@ export function VideoPlaybackControls({video}: {video: RefObject<HTMLVideoElemen
   return <section className="kiri-playback-controls" aria-label={t("Playback controls")} onKeyDown={event=>{
     if(event.key==="Escape"&&open){event.preventDefault();event.stopPropagation();setOpen(false);speedButton.current?.focus();}
   }}>
-    <input className="kiri-playback-seek" type="range" min={0} max={duration||1} step="any" value={time} disabled={!duration}
-      aria-label={t("Playback position")} aria-valuetext={videoTimeLabel(time)} onChange={event=>{if(video.current)video.current.currentTime=Number(event.target.value);}}/>
+    <PlaybackSlider value={time} max={duration} label={t("Playback position")} preview
+      onScrubStart={()=>{const player=video.current;if(player){resumeAfterScrub.current=!player.paused;player.pause();}}}
+      onScrubEnd={()=>{if(resumeAfterScrub.current){resumeAfterScrub.current=false;void video.current?.play().catch(()=>{});}}}
+      onChange={value=>{if(video.current){video.current.currentTime=value;setTime(value);}}}/>
     <div className="kiri-playback-row">
-      <button type="button" className="kiri-icon-button" disabled={!duration} onClick={togglePlay} aria-label={t(playing?"Pause":"Play")} title={t(playing?"Pause":"Play")}>
-        {playing?<Pause size={18}/>:<Play size={18}/>}</button>
+      <button type="button" className="kiri-icon-button kiri-playback-play" disabled={!duration} onClick={togglePlay} aria-label={t(playing?"Pause":"Play")} title={t(playing?"Pause":"Play")}>
+        {playing?<Pause size={17} fill="currentColor"/>:<Play size={17} fill="currentColor"/>}</button>
       <span className="kiri-playback-time">{videoTimeLabel(time)}<span> / {videoTimeLabel(duration)}</span></span>
       <div className="kiri-playback-spacer"/>
       <div className="kiri-playback-volume">
         <button type="button" className="kiri-icon-button" onClick={()=>{if(video.current)video.current.muted=!video.current.muted;}} aria-label={t(muted?"Unmute":"Mute")} title={t(muted?"Unmute":"Mute")}>
           {muted||volume===0?<VolumeX size={17}/>:<Volume2 size={17}/>}</button>
-        <input type="range" min={0} max={1} step={.01} value={muted?0:volume} aria-label={t("Volume")} onChange={event=>{if(video.current){video.current.volume=Number(event.target.value);video.current.muted=false;}}}/>
+        <PlaybackSlider value={muted?0:volume} label={t("Volume")} onChange={value=>{if(video.current){video.current.volume=value;video.current.muted=false;}}}/>
       </div>
       <div ref={panel} className="kiri-playback-speed">
         <button ref={speedButton} type="button" className="kiri-button kiri-button--secondary kiri-playback-rate" aria-label={t("Playback speed")} aria-expanded={open} aria-haspopup="dialog"

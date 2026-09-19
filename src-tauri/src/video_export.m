@@ -45,10 +45,6 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             video.preferredTransform = track.preferredTransform;
             NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
             NSMutableArray<AVMutableCompositionTrack *> *audioOutputs = [NSMutableArray array];
-            for (AVAssetTrack *audio in audioTracks) {
-                (void)audio;
-                [audioOutputs addObject:[edited addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid]];
-            }
             CMTime cursor = kCMTimeZero;
             for (size_t index = 0; index < count; index++) {
                 double start = segments[index].start, end = segments[index].end, speed = segments[index].speed;
@@ -73,11 +69,15 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     // Audio may begin later or end sooner than video. Preserve that offset.
                     CMTimeRange intersection = CMTimeRangeGetIntersection(range, audio.timeRange);
                     if (CMTIMERANGE_IS_VALID(intersection) && CMTimeCompare(intersection.duration, kCMTimeZero) > 0) {
+                        // Give each speed segment its own time-pitch processor. Reusing
+                        // one track lets Spectral carry state across a rate discontinuity.
+                        AVMutableCompositionTrack *audioOutput = [edited addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid];
+                        [audioOutputs addObject:audioOutput];
                         CMTime position = CMTimeAdd(cursor, CMTimeMultiplyByFloat64(CMTimeSubtract(intersection.start, range.start), 1.0 / speed));
-                        if (![audioOutputs[audioIndex] insertTimeRange:intersection ofTrack:audio atTime:position error:&insertError]) {
+                        if (![audioOutput insertTimeRange:intersection ofTrack:audio atTime:position error:&insertError]) {
                             snprintf(error, capacity, "%s", (insertError.localizedDescription ?: @"Could not insert audio segment.").UTF8String); return false;
                         }
-                        [audioOutputs[audioIndex] scaleTimeRange:CMTimeRangeMake(position, intersection.duration)
+                        [audioOutput scaleTimeRange:CMTimeRangeMake(position, intersection.duration)
                             toDuration:CMTimeMultiplyByFloat64(intersection.duration, 1.0 / speed)];
                     }
                 }
@@ -269,7 +269,8 @@ bool kiri_test_video_audio_stats(const char *path, double probeStart, double pro
             AVNumberOfChannelsKey: @1, AVLinearPCMBitDepthKey: @32,
             AVLinearPCMIsFloatKey: @YES, AVLinearPCMIsNonInterleaved: @NO}];
         [reader addOutput:output];
-        reader.timeRange = CMTimeRangeFromTimeToTime(CMTimeMakeWithSeconds(probeStart, 600000), CMTimeMakeWithSeconds(probeEnd, 600000));
+        // Decode continuously so an AAC seek cannot add decoder priming silence
+        // to the frequency measurement. Select the probe by sample timestamps.
         if (![reader startReading]) return false;
         size_t frames = 0, crossings = 0;
         float previous = 0, peak = 0;
@@ -282,7 +283,10 @@ bool kiri_test_video_audio_stats(const char *path, double probeStart, double pro
                 CFRelease(sample); return false;
             }
             const float *values = bytes.bytes;
+            double sampleStart = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample));
             for (size_t index = 0; index < length / sizeof(float); index++) {
+                double time = sampleStart + (double)index / 48000;
+                if (time < probeStart || time >= probeEnd) continue;
                 if (previous <= 0 && values[index] > 0) crossings++;
                 previous = values[index]; peak = MAX(peak, fabsf(previous)); frames++;
             }
