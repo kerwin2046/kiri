@@ -1243,7 +1243,15 @@ function TextEditor(props: {
 
   // Spec §6.6 resizeTextEditor: min 120×34, grows with text/font, clamped
   // to the right/bottom edges of the region.
-  const focusedOnce = useRef(false);
+  useEffect(() => {
+    // Creation happens on pointerdown. Focus after its native mouse default
+    // action, which otherwise returns WebKit focus to the underlying canvas.
+    const frame = requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -1267,13 +1275,6 @@ function TextEditor(props: {
         measureText: (value) => ctx.measureText(value).width,
       }),
     );
-    // Focus + select only on first mount; re-running el.select() on every
-    // keystroke would yank the caret to the end and break mid-text edits.
-    if (!focusedOnce.current) {
-      focusedOnce.current = true;
-      el.focus();
-      el.select();
-    }
   }, [
     bounds.height,
     bounds.width,

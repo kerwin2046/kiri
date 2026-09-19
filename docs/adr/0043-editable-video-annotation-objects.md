@@ -33,12 +33,19 @@ label. The Text tool can reopen existing text. Enter finishes, Shift + Enter add
 a line, and Escape cancels only the current video text edit. Typing retains native
 text undo; document undo remains available in the timeline. Color and background
 changes stay live while the editor is open.
+The inline editor receives focus after the native pointer default action, so a
+click followed immediately by typing works in WebKit as well as Chromium.
 
 The central picture selects overlays by their visible stacking order. A stable
 surface owns drags that cross tool modes, while the shared annotation canvas and
-existing effect handles retain their local geometry interactions. Timing remains
+existing effect handles retain their local geometry interactions.
+Selected zoom and crop tools own picture drags until the user leaves that tool,
+so annotations underneath cannot intercept a reframing gesture. Timing remains
 on independent tracks, with exact times in a secondary disclosure. Drawing,
 selection and inspector changes do not resize the timeline or preview.
+Entering the editor expands a small playback window to fit the picture, inspector
+and timeline within the current monitor's work area. Existing larger, maximized
+and fullscreen windows retain their size.
 
 ## Verification
 

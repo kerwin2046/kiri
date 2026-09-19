@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { Scissors, Trash2, Undo2, Redo2, Play, Pause, RotateCcw, X, ImagePlus, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { api } from "../lib/ipc";
+import { currentMonitor, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { fmt, t } from "../i18n";
 import { segmentSpeed, timelineSegments, sourceAtOutput, moveSegment, outputTime, splitSegment, timelineDuration, trimSegment, validSegments, videoTimeLabel, type VideoSegment } from "./video-trim.js";
 import { useVideoThumbnails } from "./useVideoThumbnails";
@@ -24,6 +25,24 @@ type VideoAnnotationTrack = {id:string;start:number;end:number;mark:AnnotationMa
 type EditDocument = { segments: VideoSegment[]; effects: VideoEffect[]; annotations:VideoAnnotationTrack[];stickers:VideoSticker[] };
 const annotationLabel=(mark:AnnotationMark)=>(mark.kind==="text"&&mark.text.trim()?`${t("Text")} · ${mark.text.trim().replace(/\s+/g," ").slice(0,16)}`:t(({pen:"Pen",rectangle:"Rectangle",line:"Line",arrow:"Arrow",text:"Text",mosaic:"Mosaic"} as const)[mark.kind]));
 const unchanged = (a: EditDocument, b: EditDocument) => JSON.stringify(a) === JSON.stringify(b);
+
+async function makeRoomForVideoEditor() {
+  const window = getCurrentWindow();
+  if (await window.isMaximized() || await window.isFullscreen()) return;
+  const [monitor, inner, outer, position] = await Promise.all([
+    currentMonitor(), window.innerSize(), window.outerSize(), window.outerPosition(),
+  ]);
+  if (!monitor) return;
+  const area = monitor.workArea, scale = monitor.scaleFactor;
+  const border = {width: outer.width - inner.width, height: outer.height - inner.height};
+  const width = Math.max(inner.width, Math.min(1060 * scale, area.size.width - border.width - 32 * scale));
+  const height = Math.max(inner.height, Math.min(720 * scale, area.size.height - border.height - 32 * scale));
+  if (width === inner.width && height === inner.height) return;
+  const x = Math.max(area.position.x, Math.min(position.x - (width - inner.width) / 2, area.position.x + area.size.width - width - border.width));
+  const y = Math.max(area.position.y, Math.min(position.y - (height - inner.height) / 2, area.position.y + area.size.height - height - border.height));
+  await window.setSize(new PhysicalSize(Math.round(width), Math.round(height)));
+  await window.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+}
 
 export function VideoTrimPlayer(props: { id: string; src: string; editable: boolean; onClose(): void; onError(): void }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -54,6 +73,9 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   const [doc, setDoc] = useState<EditDocument>({segments:[],effects:[],annotations:[],stickers:[]});
   const docRef = useRef(doc); docRef.current=doc;
   const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (editing) void makeRoomForVideoEditor().catch(() => {});
+  }, [editing]);
   const [duration, setDuration] = useState(0);
   const [sourceSize, setSourceSize] = useState({width:16,height:9});
   const [fitted, setFitted] = useState({width:1,height:1});
@@ -420,6 +442,9 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   // A stable surface owns cross-tool drags while the corresponding inspector mounts.
   function selectPictureObject(event:PointerEvent<HTMLDivElement>){
     if(!editing||playing||busy||event.button!==0||(annotating&&annotationTool!=="select"))return;
+    // A selected camera tool owns the picture: dragging an existing annotation
+    // underneath it must adjust the framing, not unexpectedly switch tools.
+    if(!annotating&&docRef.current.effects.some(item=>item.id===effectId&&(item.kind==="zoom"||item.kind==="frame")))return;
     if(event.target instanceof HTMLElement&&event.target.closest("textarea,.kiri-video-effect-resize"))return;
     const rect=event.currentTarget.getBoundingClientRect(),transform=previewTransform;
     const x=((event.clientX-rect.left)/rect.width-transform.x)/transform.sx;
