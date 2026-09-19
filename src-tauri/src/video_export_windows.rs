@@ -719,7 +719,12 @@ mod tests {
         );
         assert!((styled_clip.OriginalDuration()?.Duration - ticks(4.0)).abs() < ticks(0.1));
         styled.Clips()?.Append(&styled_clip)?;
-        for (time, dominant) in [(0.5, 0), (2.05, 2)] {
+        // The native image-clip fixture repeats its red end frame at the 2 s
+        // join; subsequent encoding can quantize that join by another frame.
+        // Sample inside the blue clip, still within the 0.6 s zoom entrance,
+        // so this checks changing mask content rather than join rounding.
+        let zoom_entry_sample = 2.15;
+        for (time, dominant) in [(0.5, 0), (zoom_entry_sample, 2)] {
             for x in [60, 220] {
                 let value = pixel(&styled, "styled", time, x, 120)?;
                 assert!(
@@ -741,7 +746,7 @@ mod tests {
             after_color[0] > 180 && after_color[1] < 60 && after_color[2] < 60,
             "color mask outlived interval"
         );
-        for time in [2.05, 3.95] {
+        for time in [zoom_entry_sample, 3.95] {
             let original_marker = pixel(&styled, "styled", time, 100, 56)?;
             let target_marker = pixel(&styled, "styled", time, 64, 36)?;
             assert!(
