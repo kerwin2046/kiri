@@ -28,7 +28,7 @@
 .kiri-video-history button {padding:0 9px;}
 .kiri-video-ruler {position:relative;display:flex;justify-content:space-between;height:26px;color:var(--kiri-secondary-label);font:400 10px ui-monospace,SFMono-Regular,Menlo,monospace;}
 .kiri-video-ruler input {position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:ew-resize;margin:0;}
-.kiri-video-ruler:focus-within {outline:1px solid var(--kiri-label);outline-offset:2px;}
+.kiri-video-ruler:has(input:focus-visible) {outline:1px solid var(--kiri-label);outline-offset:2px;}
 .kiri-video-track {height:66px;position:relative;isolation:isolate;background:#242424;cursor:crosshair;}
 .kiri-video-filmstrip {position:absolute;inset:0;display:flex;overflow:hidden;opacity:.85;pointer-events:none;}
 .kiri-video-filmstrip>div {flex:1;min-width:0;border-right:1px solid #111;}
@@ -213,3 +213,4 @@
 }
 .kiri-video-effect-tool:hover:not(:disabled) {background:var(--kiri-group-fill);}.kiri-video-effect-tool:disabled,.kiri-video-layer-label:disabled {opacity:.4;cursor:default;}
 .kiri-video-effect-tool:focus-visible {outline:1px solid var(--kiri-label);outline-offset:-1px;}
+.kiri-video-timeline-detail:has(.kiri-video-track-help) {min-height:22px;margin-top:4px;}

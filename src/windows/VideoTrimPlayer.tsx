@@ -28,7 +28,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   const video = useRef<HTMLVideoElement>(null);
   const container=useRef<HTMLDivElement>(null);
   const playbackIndex=useRef(0);
-  const [timelineHeight,setTimelineHeight]=useState(190);
+  const [timelineHeight,setTimelineHeight]=useState(230);
   const [draggedClip,setDraggedClip]=useState<number|null>(null);
   const [dropIndex,setDropIndex]=useState<number|null>(null);
   const [dragOffset,setDragOffset]=useState(0);
@@ -457,7 +457,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
         </section>:<VideoEffectsControls frameSource={maskPreviewFrame} video={video.current} sourceSize={sourceSize} effects={effects} onChange={changeEffects} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
     </div>
     {!editing&&<VideoPlaybackControls video={video}/>}
-    {editing&&<><div className="kiri-video-timeline-divider" role="separator" aria-label={t("Timeline height")} aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={360} aria-valuenow={timelineHeight} tabIndex={0} onPointerDown={resizeTimeline} onDoubleClick={()=>setTimelineHeight(190)} onKeyDown={event=>{if(["ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();setTimelineHeight(value=>Math.max(160,Math.min(360,(container.current?.clientHeight??700)*.45,value+(event.key==="ArrowUp"?20:-20))));}}}/><section className="kiri-video-timeline" aria-label={t("Video timeline")} style={{height:timelineHeight}}>
+    {editing&&<><div className="kiri-video-timeline-divider" role="separator" aria-label={t("Timeline height")} aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={360} aria-valuenow={timelineHeight} tabIndex={0} onPointerDown={resizeTimeline} onDoubleClick={()=>setTimelineHeight(230)} onKeyDown={event=>{if(["ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();setTimelineHeight(value=>Math.max(160,Math.min(360,(container.current?.clientHeight??700)*.45,value+(event.key==="ArrowUp"?20:-20))));}}}/><section className="kiri-video-timeline" aria-label={t("Video timeline")} style={{height:timelineHeight}}>
       <div className="kiri-video-edit-tools">
         <button type="button" className="kiri-button kiri-button--secondary" disabled={!valid||busy} onClick={playEdit} title={t("Play edited video · Space")}>{playing?<Pause size={14}/>:<Play size={14}/>} {t(playing?"Pause":"Play")}</button>
         <span className="kiri-video-clock">{videoTimeLabel(clockTime)}<span> / {videoTimeLabel(total)}</span></span>
