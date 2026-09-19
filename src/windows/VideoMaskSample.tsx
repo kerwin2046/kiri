@@ -27,7 +27,8 @@ export function VideoMaskSample({video,effect,frameSource}:{video:HTMLVideoEleme
       if(!video.paused)frame=requestAnimationFrame(draw);
     };
     const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(draw);};
-    const events=["loadeddata","seeked","play","pause"];
+    // WebKit may present a seeked frame later; wait for the compositor's fresh sample too.
+    const events=["loadeddata","seeked","play","pause","kiri-mask-preview-frame"];
     events.forEach(event=>video.addEventListener(event,schedule));schedule();
     return()=>{cancelAnimationFrame(frame);events.forEach(event=>video.removeEventListener(event,schedule));};
   },[video,effect,frameSource]);

@@ -231,17 +231,23 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
           return mark&&mark.id!==live?.editingId?[{...item,mark}]:[];
         });
         const draft=live?.draft?[{id:"draft",mark:live.draft,start:0,end:duration,layer:nextVideoLayer([...effects,...annotations,...stickers])}]:[];
-        const layers=orderedVideoLayers([...active.filter(item=>!isVideoAdjustment(item)),...stickers.filter(item=>player.currentTime>=item.start&&player.currentTime<item.end),...activeAnnotations,...draft]);
+        const overlays=active.filter(item=>!isVideoAdjustment(item));
+        const selectedMask=effects.find(item=>item.id===effectId&&item.kind==="mask");
+        // Style samples follow the current frame even outside the mask's visible interval.
+        if(selectedMask&&!overlays.includes(selectedMask))overlays.push(selectedMask);
+        const layers=orderedVideoLayers([...overlays,...stickers.filter(item=>player.currentTime>=item.start&&player.currentTime<item.end),...activeAnnotations,...draft]);
         for(const item of layers){
           if("mark" in item){sourceCtx.save();sourceCtx.scale(buffer.width/sourceSize.width,buffer.height/sourceSize.height);paintVideoAnnotation(sourceCtx,item.mark,sourceSize,sourceFrame);sourceCtx.restore();}
           else if("dataUrl" in item){const image=stickerImages.current.get(item.id);if(image)sourceCtx.drawImage(image,item.x*buffer.width,item.y*buffer.height,item.width*buffer.width,item.height*buffer.height);}
           else{
             if(item.id===effectId&&item.kind==="mask"){const preview=maskPreviewFrame.current??(maskPreviewFrame.current=document.createElement("canvas"));preview.width=buffer.width;preview.height=buffer.height;preview.getContext("2d")?.drawImage(buffer,0,0);}
+            if(item===selectedMask&&!active.includes(item))continue;
             paintVideoEffect(sourceCtx,item,player.currentTime,maskScratch);
           }
         }
         paintVideoEffects(sourceCtx,active.filter(isVideoAdjustment),player.currentTime,maskScratch);
         ctx.clearRect(0,0,output.width,output.height);ctx.drawImage(buffer,0,0);
+        if(selectedMask)player.dispatchEvent(new Event("kiri-mask-preview-frame"));
       }
       if(!player.paused||repaintAttempts-->0) frame=requestAnimationFrame(draw);
     };
