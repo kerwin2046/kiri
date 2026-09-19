@@ -403,11 +403,9 @@
   "Segment %d start": "クリップ%dの開始",
   "Segment %d end": "クリップ%dの終了",
   "Thumbnails unavailable; editing still works.": "サムネイルを表示できません。編集は可能です。",
-  "%d segments · Source %@": "%dクリップ · 元の長さ %@",
   "Segment %d": "クリップ%d",
   "In": "開始",
   "Out": "終了",
-  "Click to seek. Drag clip edges to trim. Split to remove a middle section.": "クリックで移動、両端をドラッグしてトリミング。分割して中間部分を削除できます。",
   "Video effects": "映像効果",
   "Add zoom": "ズームを追加",
   "Add privacy mask": "マスクを追加",
@@ -477,5 +475,14 @@
   "Resize bottom-right": "右下を調整",
   "Resize bottom": "下辺を調整",
   "Resize bottom-left": "左下を調整",
-  "Resize left": "左辺を調整"
+  "Resize left": "左辺を調整",
+  "Clip speed": "クリップの速度",
+  "Original speed": "元の速度",
+  "Timeline height": "タイムラインの高さ",
+  "Drag to reorder. Alt + arrow keys also moves the clip.": "ドラッグで並べ替え。Alt + 矢印キーでも移動できます。",
+  "Source in": "元動画の開始",
+  "Source out": "元動画の終了",
+  "%d effects outside the edit": "編集範囲外のエフェクト：%d",
+  "These effects stay saved but do not appear in this export.": "これらのエフェクトは保持されますが、今回の書き出しには含まれません。",
+  "Changing clip speed also changes audio pitch on Windows.": "Windows ではクリップ速度を変更すると音程も変わります。"
 }

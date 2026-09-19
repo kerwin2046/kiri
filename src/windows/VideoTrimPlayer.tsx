@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { Scissors, Trash2, Undo2, Redo2, Play, Pause, RotateCcw, X, Pencil } from "lucide-react";
+import { Scissors, Trash2, Undo2, Redo2, Play, Pause, RotateCcw, X, Pencil, SlidersHorizontal } from "lucide-react";
 import { api } from "../lib/ipc";
 import { fmt, t } from "../i18n";
-import { deletedRanges, nextPlayableTime, outputTime, splitSegment, timelineDuration, trimSegment, validSegments, videoTimeLabel, type VideoSegment } from "./video-trim.js";
+import { segmentSpeed, timelineSegments, projectTimedRange, sourceAtOutput, moveSegment, outputTime, splitSegment, timelineDuration, trimSegment, validSegments, videoTimeLabel, type VideoSegment } from "./video-trim.js";
 import { useVideoThumbnails } from "./useVideoThumbnails";
 import { VideoEffectsControls, VideoEffectsOverlay } from "./VideoEffects";
 import {videoZoomViewport, type VideoEffect} from "./video-effects";
 import {paintVideoMasks} from "./video-effect-render";
 import "./video-trim.css";
-import {VideoEffectTracks} from "./VideoEffectTracks";
+import {VideoOutputEffectTracks} from "./VideoOutputEffectTracks";
+import {ChoiceSelect} from "../components/ChoiceSelect";
 import {VideoPlaybackControls} from "./VideoPlaybackControls";
 import {VideoTimeInput} from "./VideoTimeInput";
 import {VideoExportSettings} from "./VideoExportSettings";
@@ -23,6 +24,15 @@ const unchanged = (a: EditDocument, b: EditDocument) => JSON.stringify(a) === JS
 
 export function VideoTrimPlayer(props: { id: string; src: string; editable: boolean; onClose(): void; onError(): void }) {
   const video = useRef<HTMLVideoElement>(null);
+  const container=useRef<HTMLDivElement>(null);
+  const playbackIndex=useRef(0);
+  const [timelineHeight,setTimelineHeight]=useState(210);
+  const [draggedClip,setDraggedClip]=useState<number|null>(null);
+  const [dropIndex,setDropIndex]=useState<number|null>(null);
+  const [dragOffset,setDragOffset]=useState(0);
+  const [inspectorOpen,setInspectorOpen]=useState(false);
+  const suppressClick=useRef(false);
+  const isWindows=/Windows/i.test(navigator.userAgent);
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -60,6 +70,8 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   const trackLabels=Object.fromEntries(annotations.map(item=>[item.id,annotationLabel(item.mark)]));
   const selectedClip=segments[selected];
   const total=timelineDuration(segments);
+  const timeline=timelineSegments(segments);
+  const clockTime=outputTime(segments,time,playbackIndex.current);
   const valid=validSegments(segments,duration);
   const canSplit=splitSegment(segments,time)!==segments;
 
@@ -69,8 +81,12 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     commitAnnotation.current?.();
     previewing.current=false;previewStop.current=null; player.pause();
     const next=Math.max(0,Math.min(duration,value));
+    const index=docRef.current.segments.findIndex(segment=>next>=segment.start&&next<segment.end);
+    if(index>=0)playbackIndex.current=index;
     player.currentTime=next; setTime(next);
   },[duration]);
+
+  function seekOutput(value:number){const target=sourceAtOutput(docRef.current.segments,value);if(!target)return;seek(target.time);playbackIndex.current=target.index;setSelected(target.index);}
 
   function apply(next: EditDocument, transient=false) {
     const previous=docRef.current;
@@ -84,7 +100,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       }
     }
     docRef.current=next; setDoc(next);
-    setSavedId(null); setError(false); previewing.current=false; video.current?.pause();
+    setSavedId(null); setError(false); previewing.current=false;previewStop.current=null; video.current?.pause();
   }
   function undo(redo=false) {
     if(busy || dragBase.current) return;
@@ -94,7 +110,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     (redo ? history.current.past : history.current.future).push(docRef.current);
     docRef.current=next; setDoc(next); setEffectId(null);setAnnotationRevision(value=>value+1);
     setSelected(index=>Math.min(index,Math.max(0,next.segments.length-1)));
-    setSavedId(null); setError(false); previewing.current=false; video.current?.pause();
+    setSavedId(null); setError(false); previewing.current=false;previewStop.current=null; video.current?.pause();
   }
   function split() {
     if(busy) return;
@@ -111,36 +127,42 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     apply({...docRef.current,segments:next});
     setSelected(Math.max(0,Math.min(selected,next.length-1)));
     setEffectId(null);
-    const nextTime=nextPlayableTime(next,time); if(nextTime!=null) seek(nextTime);
+    const target=next[Math.min(selected,next.length-1)];if(target)seek(target.start);
   }
-  function playEdit() {
-    const player=video.current; if(!player || !valid || busy) return;
+  function setClipRate(player:HTMLVideoElement,segment:VideoSegment){player.playbackRate=segmentSpeed(segment);player.preservesPitch=!isWindows;}
+  function playEdit(){
+    const player=video.current;if(!player||!valid||busy)return;
     previewStop.current=null;
-    if(!player.paused) {previewing.current=false;player.pause();return;}
-    commitAnnotation.current?.();
-    setEffectId(null);setAnnotating(false);
-    const next=nextPlayableTime(segments,player.currentTime) ?? segments[0].start;
-    player.currentTime=next; previewing.current=true;
+    if(!player.paused){previewing.current=false;player.pause();return;}
+    commitAnnotation.current?.();setEffectId(null);setAnnotating(false);
+    const clips=docRef.current.segments;
+    let index=clips.findIndex((clip,i)=>i===playbackIndex.current&&player.currentTime>=clip.start&&player.currentTime<clip.end-.001);
+    if(index<0)index=clips.findIndex(clip=>player.currentTime>=clip.start&&player.currentTime<clip.end-.001);
+    if(index<0){index=playbackIndex.current>=clips.length-1?0:Math.max(0,playbackIndex.current);player.currentTime=clips[index].start;}
+    playbackIndex.current=index;setSelected(index);setClipRate(player,clips[index]);previewing.current=true;
     void player.play().catch(()=>{previewing.current=false;});
   }
-  function previewEffect(id:string) {
-    commitAnnotation.current?.();
-    const effect=docRef.current.effects.find(item=>item.id===id),player=video.current;
+  function previewEffect(id:string){
+    commitAnnotation.current?.();const current=docRef.current,effect=current.effects.find(item=>item.id===id),player=video.current;
     if(!effect||!player||busy)return;
+    const range=projectTimedRange(current.segments,effect.start,effect.end)[0];
+    if(!range){setEffectId(id);setInspectorOpen(true);return;}
     setEffectId(null);setAnnotating(false);
-    player.currentTime=Math.max(0,effect.start-.15);
-    previewStop.current=Math.min(duration,effect.end+.15);previewing.current=true;
+    const from=Math.max(range.clipStart,range.start-.15),until=Math.min(range.clipEnd,range.end+.15),target=sourceAtOutput(current.segments,from);if(!target)return;
+    playbackIndex.current=target.index;setSelected(target.index);setClipRate(player,current.segments[target.index]);player.currentTime=target.time;
+    previewStop.current=until;previewing.current=true;
     void player.play().catch(()=>{previewing.current=false;previewStop.current=null;});
   }
-  function updatePlayback() {
-    const player=video.current; if(!player) return;
-    if(previewStop.current!==null&&player.currentTime>=previewStop.current){player.pause();previewing.current=false;previewStop.current=null;}
-    if(previewing.current) {
-      const next=nextPlayableTime(docRef.current.segments,player.currentTime);
-      if(next==null) {
-        previewing.current=false; player.pause();
-        player.currentTime=docRef.current.segments[docRef.current.segments.length-1]?.end ?? 0;
-      } else if(next>player.currentTime+0.001) player.currentTime=next;
+  function updatePlayback(){
+    const player=video.current;if(!player)return;
+    if(previewStop.current!==null&&outputTime(docRef.current.segments,player.currentTime,playbackIndex.current)>=previewStop.current){player.pause();previewing.current=false;previewStop.current=null;}
+    if(previewing.current&&!player.seeking){
+      const clips=docRef.current.segments,current=clips[playbackIndex.current];
+      if(current&&player.currentTime>=current.end-.001){
+        const next=clips[playbackIndex.current+1];
+        if(next){playbackIndex.current++;setSelected(playbackIndex.current);setClipRate(player,next);player.currentTime=next.start;if(player.paused)void player.play().catch(()=>{previewing.current=false;});}
+        else{previewing.current=false;player.pause();player.currentTime=current.end;}
+      }
     }
     setTime(player.currentTime);
   }
@@ -180,8 +202,8 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     let frame=0;
     const draw=()=>{
       cancelAnimationFrame(frame);
-      const playable=nextPlayableTime(docRef.current.segments,player.currentTime);
-      const inDeletedGap=previewing.current && (playable==null || playable>player.currentTime+0.001);
+      const clip=docRef.current.segments[playbackIndex.current];
+      const inDeletedGap=previewing.current&&(!clip||player.currentTime<clip.start||player.currentTime>=clip.end);
       if(player.readyState>=2 && !player.seeking && !inDeletedGap) {
         const active=effects.filter(e=>player.currentTime>=e.start && player.currentTime<e.end);
         frameCtx.drawImage(player,0,0,sourceSize.width,sourceSize.height);
@@ -221,23 +243,55 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   function dragHandle(event:PointerEvent<HTMLDivElement>,index:number,edge:"start"|"end") {
     if(busy || !track.current) return;
     event.preventDefault();event.stopPropagation();
-    const target=event.currentTarget,rect=track.current.getBoundingClientRect();
+    const target=event.currentTarget,rect=track.current.getBoundingClientRect(),origin=event.clientX;
     commitAnnotation.current?.();
     const baseline=docRef.current;
     setSelected(index);setEffectId(null);setAnnotating(false);dragBase.current=baseline;
     target.setPointerCapture(event.pointerId);
     const move=(e:globalThis.PointerEvent)=>{
-      const value=(e.clientX-rect.left)/rect.width*duration;
+      const value=baseline.segments[index][edge]+(e.clientX-origin)/rect.width*timelineDuration(baseline.segments)*segmentSpeed(baseline.segments[index]);
       const next=trimSegment(baseline.segments,index,edge,value,duration);
-      apply({...baseline,segments:next},true);seek(next[index][edge]);
+      apply({...baseline,segments:next},true);seek(next[index][edge]);playbackIndex.current=index;
     };
     const finish=(e:globalThis.PointerEvent)=>{
-      target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",cancel);
+      target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",cancel);window.removeEventListener("keydown",key,true);
       if(target.hasPointerCapture(e.pointerId)) target.releasePointerCapture(e.pointerId);
       apply(docRef.current);
     };
     const cancel=(e:globalThis.PointerEvent)=>{docRef.current=baseline;finish(e);setDoc(baseline);};
-    target.addEventListener("pointermove",move);target.addEventListener("pointerup",finish);target.addEventListener("pointercancel",cancel);
+    const key=(e:globalThis.KeyboardEvent)=>{if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();cancel(new globalThis.PointerEvent("pointercancel",{pointerId:event.pointerId}));}};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",finish);target.addEventListener("pointercancel",cancel);window.addEventListener("keydown",key,true);
+  }
+
+  function reorderClip(from:number,to:number){
+    commitAnnotation.current?.();const current=docRef.current,next=moveSegment(current.segments,from,to);if(next===current.segments)return;
+    apply({...current,segments:next});setSelected(to);playbackIndex.current=to;setEffectId(null);setAnnotating(false);seek(next[to].start);
+  }
+  function dragClip(event:PointerEvent<HTMLButtonElement>,index:number){
+    if(busy||event.button!==0||!track.current)return;
+    event.stopPropagation();commitAnnotation.current?.();video.current?.pause();previewing.current=false;
+    const target=event.currentTarget,rect=track.current.getBoundingClientRect(),origin=event.clientX;
+    const entries=timelineSegments(docRef.current.segments),length=entries.length,extent=timelineDuration(docRef.current.segments);
+    let moved=false,slot=index;
+    setSelected(index);target.setPointerCapture(event.pointerId);
+    const move=(e:globalThis.PointerEvent)=>{
+      if(!moved&&Math.abs(e.clientX-origin)<5)return;
+      moved=true;setDraggedClip(index);setDragOffset(e.clientX-origin);
+      const point=(e.clientX-rect.left)/rect.width*extent;
+      slot=entries.findIndex(entry=>point<(entry.start+entry.end)/2);if(slot<0)slot=length;
+      setDropIndex(slot);
+    };
+    const cleanup=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",cancel);window.removeEventListener("keydown",key,true);setDraggedClip(null);setDropIndex(null);setDragOffset(0);};
+    const finish=()=>{cleanup();if(moved){suppressClick.current=true;reorderClip(index,Math.max(0,Math.min(length-1,slot>index?slot-1:slot)));}};
+    const cancel=()=>{cleanup();suppressClick.current=moved;};
+    const key=(e:globalThis.KeyboardEvent)=>{if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();cancel();}};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",finish);target.addEventListener("pointercancel",cancel);window.addEventListener("keydown",key,true);
+  }
+  function resizeTimeline(event:PointerEvent<HTMLDivElement>){
+    if(event.button!==0)return;event.preventDefault();const target=event.currentTarget,origin=event.clientY,initial=timelineHeight;target.setPointerCapture(event.pointerId);
+    const move=(e:globalThis.PointerEvent)=>{const maximum=Math.min(400,(container.current?.clientHeight??700)*.5);setTimelineHeight(Math.max(160,Math.min(maximum,initial+origin-e.clientY)));};
+    const finish=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",finish);};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",finish);target.addEventListener("pointercancel",finish);
   }
 
   async function saveCopy() {
@@ -281,6 +335,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     if(added.length)setAnnotationId(added[added.length-1].id);
   }
   function selectTrack(id:string){
+    setInspectorOpen(true);
     commitAnnotation.current?.();
     setAnnotationRevision(value=>value+1);
     if(id.startsWith("annotation-")){setAnnotationId(id);setEffectId(null);setAnnotating(true);}
@@ -295,10 +350,11 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     })},transient);
   }
 
-  return <div className={`kiri-video-player ${editing ? "kiri-video-player--editing" : ""}`}>
+  return <div ref={container} className={`kiri-video-player ${editing ? "kiri-video-player--editing" : ""}`}>
     <header className="kiri-video-editor-heading">
       <div><strong>{t(editing ? "Video editor" : "Video")}</strong><span>{t(editing ? "Your original recording stays unchanged." : "Esc to close")}</span></div>
       <div className="kiri-video-header-actions">
+        {editing&&<button type="button" className="kiri-button kiri-button--secondary kiri-video-inspector-toggle" disabled={busy} aria-label={t("Video effects")} aria-pressed={inspectorOpen} onClick={()=>setInspectorOpen(value=>!value)}><SlidersHorizontal size={14}/><span>{t("Video effects")}</span></button>}
         {editing&&<button type="button" className="kiri-button kiri-button--secondary" disabled={busy} aria-pressed={annotating} onClick={()=>{commitAnnotation.current?.();video.current?.pause();previewing.current=false;setEffectId(null);setAnnotating(value=>!value);}}><Pencil size={14}/>{t("Annotate video")}</button>}
         {editing ? <button type="button" className="kiri-button kiri-button--secondary" disabled={busy} onClick={()=>{commitAnnotation.current?.();previewing.current=false;video.current?.pause();setEditing(false);setAnnotating(false);}}>{t("Close editor")}</button>
           : props.editable && <button type="button" className="kiri-button kiri-button--primary" disabled={duration<=0} onClick={()=>{video.current?.pause();setEditing(true);}}><Scissors size={14}/>{t("Trim & Export")}</button>}
@@ -318,7 +374,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
               const initial={segments:d>0?[{start:0,end:d}]:[],effects:[],annotations:[]};docRef.current=initial;setDoc(initial);
             }}
             onTimeUpdate={updatePlayback} onSeeked={updatePlayback}
-            onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{previewing.current=false;setPlaying(false);}}
+            onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{updatePlayback();if(!previewing.current)setPlaying(false);}}
             onError={props.onError} />
           {editing && !annotating && <canvas ref={canvas} className="kiri-video-effect-preview" aria-label={t("Edited video preview")} />}
           {editing&&annotating&&<div className="kiri-video-annotation-editor"><VideoAnnotationsEditor onCommitReady={registerAnnotationCommit} toolbarHost={annotationToolbar} image={sourceImage} sourceSize={sourceSize} viewSize={fitted} marks={visibleAnnotations.map(item=>item.mark)} revision={annotationRevision} selectedMarkId={selectedAnnotation?.mark.id??null} onSelectionChange={markId=>setAnnotationId(markId===null?null:docRef.current.annotations.find(item=>item.mark.id===markId)?.id??null)} disabled={busy} onChange={changeAnnotationMarks} onUndo={()=>undo()} onRedo={()=>undo(true)} canUndo={!!history.current.past.length} canRedo={!!history.current.future.length} onClose={()=>setAnnotating(false)}/></div>}
@@ -326,7 +382,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
         </div>
         {editing && <span className="kiri-video-view-label">{t(effectId||annotating?"Position the effect on the original frame":"Edited preview")}</span>}
       </div>
-      {editing && <aside className="kiri-video-inspector">{annotating?<section className="kiri-video-annotation-inspector"><strong>{t("Annotation timing")}</strong>
+      {editing && inspectorOpen && <aside className="kiri-video-inspector">{annotating?<section className="kiri-video-annotation-inspector"><strong>{t("Annotation timing")}</strong>
         <p>{t("Each annotation has its own track. Drag its edges to set when it appears.")}</p>
         {selectedAnnotation&&<><span>{annotationLabel(selectedAnnotation.mark)}</span>{(["start","end"] as const).map(edge=><label key={edge}>{t(edge==="start"?"Effect start":"Effect end")}<VideoTimeInput value={selectedAnnotation[edge]} min={edge==="start"?0:selectedAnnotation.start+.05} max={edge==="start"?selectedAnnotation.end-.05:duration} step={.1} disabled={busy} onCommit={value=>{
           commitAnnotation.current?.();
@@ -336,10 +392,10 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
         </section>:<VideoEffectsControls onPreview={previewEffect} effects={effects} onChange={(next,transient)=>apply({...docRef.current,effects:next},transient)} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
     </div>
     {!editing&&<VideoPlaybackControls video={video}/>}
-    {editing&&<section className="kiri-video-timeline" aria-label={t("Video timeline")}>
+    {editing&&<><div className="kiri-video-timeline-divider" role="separator" aria-label={t("Timeline height")} aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={400} aria-valuenow={timelineHeight} tabIndex={0} onPointerDown={resizeTimeline} onKeyDown={event=>{if(["ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();setTimelineHeight(value=>Math.max(160,Math.min(400,value+(event.key==="ArrowUp"?20:-20))));}}}/><section className="kiri-video-timeline" aria-label={t("Video timeline")} style={{height:timelineHeight}}>
       <div className="kiri-video-edit-tools">
         <button type="button" className="kiri-button kiri-button--secondary" disabled={!valid||busy} onClick={playEdit} title={t("Play edited video · Space")}>{playing?<Pause size={14}/>:<Play size={14}/>} {t(playing?"Pause":"Preview edit")}</button>
-        <span className="kiri-video-clock">{videoTimeLabel(outputTime(segments,time))}<span> / {videoTimeLabel(total)}</span></span>
+        <span className="kiri-video-clock">{videoTimeLabel(clockTime)}<span> / {videoTimeLabel(total)}</span></span>
         <div className="kiri-video-tool-divider"/>
         <button type="button" className="kiri-button kiri-button--secondary" disabled={!canSplit||busy} onClick={split} title={t("Split at playhead · S")}><Scissors size={14}/>{t("Split")}</button>
         <button type="button" className="kiri-button kiri-button--secondary" disabled={!selectedClip||busy} onClick={removeClip}><Trash2 size={14}/>{t("Delete segment")}</button>
@@ -349,38 +405,32 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
           <button type="button" className="kiri-button kiri-button--secondary" disabled={busy} onClick={()=>{commitAnnotation.current?.();apply({segments:[{start:0,end:duration}],effects:[],annotations:[]});setAnnotationRevision(v=>v+1);setSelected(0);setEffectId(null);seek(0);}} title={t("Reset edit")} aria-label={t("Reset edit")}><RotateCcw size={14}/></button>
         </div>
       </div>
-      <div className="kiri-video-lanes">
+      <div className="kiri-video-lanes-scroll"><div className="kiri-video-lanes">
       <div className="kiri-video-ruler">
-        {Array.from({length:6},(_,i)=><span key={i}>{videoTimeLabel(duration*i/5)}</span>)}
-        <input type="range" min={0} max={duration} step="any" value={time} disabled={busy} aria-label={t("Playhead")} aria-valuetext={videoTimeLabel(time)} onChange={e=>seek(Number(e.target.value))}/>
+        {Array.from({length:6},(_,i)=><span key={i}>{videoTimeLabel(total*i/5)}</span>)}
+        <input type="range" min={0} max={total} step="any" value={Math.min(total,clockTime)} disabled={busy||!total} aria-label={t("Playhead")} aria-valuetext={videoTimeLabel(clockTime)} onChange={event=>seekOutput(Number(event.target.value))}/>
       </div>
-      <div ref={track} className="kiri-video-track" onClick={event=>{
-        if(busy||!track.current)return;const rect=track.current.getBoundingClientRect();seek((event.clientX-rect.left)/rect.width*duration);
-      }}>
+      <div ref={track} className="kiri-video-track" onClick={event=>{if(busy||!track.current)return;const rect=track.current.getBoundingClientRect();seekOutput((event.clientX-rect.left)/rect.width*total);}}>
         <span className="kiri-video-lane-label">{t("Video")}</span>
-        <div className="kiri-video-filmstrip" aria-hidden="true">{Array.from({length:12},(_,index)=><div key={index}>{frames[index]&&<img src={frames[index]} draggable={false} alt=""/>}</div>)}</div>
-        {deletedRanges(segments,duration).map((gap,i)=><div key={`gap-${i}`} className="kiri-video-removed" style={{left:`${gap.start/duration*100}%`,width:`${(gap.end-gap.start)/duration*100}%`}}/>)}
-        {segments.map((clip,index)=><div key={index} className="kiri-video-clip" data-selected={index===selected} style={{left:`${clip.start/duration*100}%`,width:`${(clip.end-clip.start)/duration*100}%`}}>
-          <button type="button" className="kiri-video-clip-select" disabled={busy} aria-pressed={index===selected} aria-label={fmt("Segment %d: %@ to %@",index+1,videoTimeLabel(clip.start),videoTimeLabel(clip.end))} onClick={event=>{
-            event.stopPropagation();commitAnnotation.current?.();setSelected(index);setEffectId(null);setAnnotating(false);const rect=track.current!.getBoundingClientRect();seek(event.detail===0?clip.start:Math.min(clip.end,Math.max(clip.start,(event.clientX-rect.left)/rect.width*duration)));
-          }}><span>{String(index+1).padStart(2,"0")}</span></button>
-          {(["start","end"] as const).map(edge=><div key={edge} className={`kiri-video-trim-handle kiri-video-trim-handle--${edge}`} role="slider" tabIndex={busy?-1:0} aria-label={fmt(edge==="start"?"Segment %d start":"Segment %d end",index+1)} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={clip[edge]} aria-valuetext={videoTimeLabel(clip[edge])} onPointerDown={event=>dragHandle(event,index,edge)} onClick={event=>event.stopPropagation()} onKeyDown={event=>{
-            if(busy||!["ArrowLeft","ArrowRight"].includes(event.key))return;event.preventDefault();const next=trimSegment(segments,index,edge,clip[edge]+(event.key==="ArrowLeft"?-1:1)*(event.shiftKey?1:.1),duration);apply({...docRef.current,segments:next});seek(next[index][edge]);
-          }}/>) }
+        {timeline.map(({segment:clip,index,start,end})=><div key={index} className="kiri-video-clip" data-selected={index===selected} data-dragging={index===draggedClip} style={{left:`${total?start/total*100:0}%`,width:`${total?(end-start)/total*100:0}%`,transform:index===draggedClip?`translateX(${dragOffset}px)`:undefined}}>
+          <div className="kiri-video-filmstrip" aria-hidden="true">{Array.from({length:Math.max(1,Math.min(8,Math.ceil((end-start)/Math.max(total,.1)*12)))},(_,i)=>{const source=clip.start+(clip.end-clip.start)*i/Math.max(1,Math.ceil((end-start)/Math.max(total,.1)*12));const frame=frames[Math.min(frames.length-1,Math.floor(source/Math.max(duration,.1)*frames.length))];return <div key={i}>{frame&&<img src={frame} draggable={false} alt=""/>}</div>;})}</div>
+          <button type="button" className="kiri-video-clip-select" disabled={busy} aria-pressed={index===selected} aria-label={fmt("Segment %d: %@ to %@",index+1,videoTimeLabel(clip.start),videoTimeLabel(clip.end))} title={t("Drag to reorder. Alt + arrow keys also moves the clip.")} onPointerDown={event=>dragClip(event,index)} onKeyDown={event=>{if(event.altKey&&["ArrowLeft","ArrowRight"].includes(event.key)){event.preventDefault();reorderClip(index,Math.max(0,Math.min(segments.length-1,index+(event.key==="ArrowLeft"?-1:1))));}}} onClick={event=>{event.stopPropagation();if(suppressClick.current){suppressClick.current=false;return;}commitAnnotation.current?.();setSelected(index);setEffectId(null);setAnnotating(false);const rect=track.current!.getBoundingClientRect();seekOutput(event.detail===0?start:Math.min(end,Math.max(start,(event.clientX-rect.left)/rect.width*total)));}}><span>{String(index+1).padStart(2,"0")}</span>{segmentSpeed(clip)!==1&&<span className="kiri-video-clip-rate">{segmentSpeed(clip)}×</span>}</button>
+          {(["start","end"] as const).map(edge=><div key={edge} className={`kiri-video-trim-handle kiri-video-trim-handle--${edge}`} role="slider" tabIndex={busy?-1:0} aria-label={fmt(edge==="start"?"Segment %d start":"Segment %d end",index+1)} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={clip[edge]} aria-valuetext={videoTimeLabel(clip[edge])} onPointerDown={event=>dragHandle(event,index,edge)} onClick={event=>event.stopPropagation()} onKeyDown={event=>{if(busy||!["ArrowLeft","ArrowRight"].includes(event.key))return;event.preventDefault();const next=trimSegment(segments,index,edge,clip[edge]+(event.key==="ArrowLeft"?-1:1)*(event.shiftKey?1:.1),duration);apply({...docRef.current,segments:next});seek(next[index][edge]);playbackIndex.current=index;}}/>) }
         </div>)}
-        <div className="kiri-video-playhead" style={{left:`${duration?time/duration*100:0}%`}}><span/></div>
+        {dropIndex!==null&&<div className="kiri-video-drop-marker" style={{left:`${total?(timeline[dropIndex]?.start??total)/total*100:0}%`}}/>}
+        <div className="kiri-video-playhead" style={{left:`${total?Math.min(total,clockTime)/total*100:0}%`}}><span/></div>
       </div>
-      <VideoEffectTracks effects={timelineItems} labels={trackLabels} duration={duration} selectedId={annotating?annotationId:effectId} disabled={busy} onSelect={selectTrack} onSeek={seek} onChange={changeTracks}/>
-      </div>
+      <VideoOutputEffectTracks effects={timelineItems} labels={trackLabels} segments={segments} sourceDuration={duration} selectedId={annotating?annotationId:effectId} disabled={busy} onSelect={selectTrack} onSeek={seek} onChange={changeTracks}/>
+      </div></div>
       <div className="kiri-video-timeline-detail">
-        <span>{thumbnailFailed?t("Thumbnails unavailable; editing still works."):fmt("%d segments · Source %@",segments.length,videoTimeLabel(duration))}</span>
-        {selectedClip&&<div className="kiri-video-clip-fields"><span>{fmt("Segment %d",selected+1)}</span>{(["start","end"] as const).map(edge=><label key={edge}>{t(edge==="start"?"In":"Out")}<VideoTimeInput key={`${selected}-${edge}`}  min={0} max={duration} step={.1} disabled={busy} aria-label={t(edge==="start"?"Start time in seconds":"End time in seconds")} value={Number(selectedClip[edge].toFixed(3))} onCommit={value=>{const next=trimSegment(segments,selected,edge,value,duration);apply({...docRef.current,segments:next});seek(next[selected][edge]);}}/></label>)}</div>}
+        {thumbnailFailed&&<span>{t("Thumbnails unavailable; editing still works.")}</span>}
+        {selectedClip&&<div className="kiri-video-clip-fields"><span>{fmt("Segment %d",selected+1)}</span><ChoiceSelect label={t("Clip speed")} value={String(segmentSpeed(selectedClip))} disabled={busy} onChange={value=>{commitAnnotation.current?.();apply({...docRef.current,segments:docRef.current.segments.map((clip,index)=>index===selected?{...clip,speed:Number(value)}:clip)});}} options={[.25,.5,.75,1,1.25,1.5,2,3,4].map(speed=>({value:String(speed),label:`${speed}×`,description:speed===1?t("Original speed"):undefined}))}/><span>{videoTimeLabel((selectedClip.end-selectedClip.start)/segmentSpeed(selectedClip))}</span>{(["start","end"] as const).map(edge=><label key={edge}>{t(edge==="start"?"Source in":"Source out")}<VideoTimeInput key={`${selected}-${edge}`}  min={0} max={duration} step={.1} disabled={busy} aria-label={t(edge==="start"?"Start time in seconds":"End time in seconds")} value={Number(selectedClip[edge].toFixed(3))} onCommit={value=>{const next=trimSegment(segments,selected,edge,value,duration);apply({...docRef.current,segments:next});seek(next[selected][edge]);playbackIndex.current=selected;}}/></label>)}</div>}
       </div>
-      <footer className="kiri-video-export-footer">
-        <div className="kiri-video-export-status" role={error?"alert":"status"}>{busy?t("Saving a new video to your library…"):error?t("Couldn't export the video. Check library access and free disk space, then retry."):savedId?<>{t("Copy saved to library")}<button type="button" className="kiri-button kiri-button--secondary" onClick={()=>void api.openAsset(savedId).catch(()=>setError(true))}>{t("Open")}</button></>:t("Click to seek. Drag clip edges to trim. Split to remove a middle section.")}</div>
+      {isWindows&&selectedClip&&segmentSpeed(selectedClip)!==1&&<p className="kiri-video-pitch-note">{t("Changing clip speed also changes audio pitch on Windows.")}</p>}
+    </section><footer className="kiri-video-export-footer">
+        <div className="kiri-video-export-status" role={error?"alert":"status"}>{busy?t("Saving a new video to your library…"):error?t("Couldn't export the video. Check library access and free disk space, then retry."):savedId?<>{t("Copy saved to library")}<button type="button" className="kiri-button kiri-button--secondary" onClick={()=>void api.openAsset(savedId).catch(()=>setError(true))}>{t("Open")}</button></>:null}</div>
         <VideoExportSettings preset={preset} onChange={next=>{setPreset(next);setSavedId(null);}} sourceSize={sourceSize} outputDuration={total} disabled={busy}/>
         <button type="button" className="kiri-button kiri-button--primary" disabled={!valid||busy} onClick={()=>void saveCopy()}>{t(busy?"Exporting…":"Save a Copy")}</button>
-      </footer>
-    </section>}
+      </footer></>}
   </div>;
 }

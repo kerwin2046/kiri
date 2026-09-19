@@ -403,11 +403,9 @@
   "Segment %d start": "Segment %d start",
   "Segment %d end": "Segment %d end",
   "Thumbnails unavailable; editing still works.": "Thumbnails unavailable; editing still works.",
-  "%d segments · Source %@": "%d segments · Source %@",
   "Segment %d": "Segment %d",
   "In": "In",
   "Out": "Out",
-  "Click to seek. Drag clip edges to trim. Split to remove a middle section.": "Click to seek. Drag clip edges to trim. Split to remove a middle section.",
   "Video effects": "Video effects",
   "Add zoom": "Add zoom",
   "Add privacy mask": "Add privacy mask",
@@ -477,5 +475,14 @@
   "Resize bottom-right": "Resize bottom-right",
   "Resize bottom": "Resize bottom",
   "Resize bottom-left": "Resize bottom-left",
-  "Resize left": "Resize left"
+  "Resize left": "Resize left",
+  "Clip speed": "Clip speed",
+  "Original speed": "Original speed",
+  "Timeline height": "Timeline height",
+  "Drag to reorder. Alt + arrow keys also moves the clip.": "Drag to reorder. Alt + arrow keys also moves the clip.",
+  "Source in": "Source in",
+  "Source out": "Source out",
+  "%d effects outside the edit": "%d effects outside the edit",
+  "These effects stay saved but do not appear in this export.": "These effects stay saved but do not appear in this export.",
+  "Changing clip speed also changes audio pitch on Windows.": "Changing clip speed also changes audio pitch on Windows."
 }

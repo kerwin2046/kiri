@@ -403,11 +403,9 @@
   "Segment %d start": "片段 %d 起点",
   "Segment %d end": "片段 %d 终点",
   "Thumbnails unavailable; editing still works.": "缩略图暂不可用，仍可正常剪辑。",
-  "%d segments · Source %@": "%d 个片段 · 原片 %@",
   "Segment %d": "片段 %d",
   "In": "起点",
   "Out": "终点",
-  "Click to seek. Drag clip edges to trim. Split to remove a middle section.": "点击定位，拖动两端裁剪；分割后可删除中间片段。",
   "Video effects": "画面效果",
   "Add zoom": "局部放大",
   "Add privacy mask": "隐私遮挡",
@@ -477,5 +475,14 @@
   "Resize bottom-right": "调整右下角",
   "Resize bottom": "调整下边缘",
   "Resize bottom-left": "调整左下角",
-  "Resize left": "调整左边缘"
+  "Resize left": "调整左边缘",
+  "Clip speed": "片段速度",
+  "Original speed": "原始速度",
+  "Timeline height": "时间轴高度",
+  "Drag to reorder. Alt + arrow keys also moves the clip.": "拖动调整顺序，也可按 Alt + 方向键移动片段。",
+  "Source in": "原片入点",
+  "Source out": "原片出点",
+  "%d effects outside the edit": "%d 个效果位于剪辑范围外",
+  "These effects stay saved but do not appear in this export.": "这些效果仍会保留，但不会出现在本次导出中。",
+  "Changing clip speed also changes audio pitch on Windows.": "Windows 上调整片段速度也会改变音调。"
 }

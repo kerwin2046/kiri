@@ -3,7 +3,7 @@
 #import <CoreImage/CoreImage.h>
 #import <math.h>
 
-typedef struct { double start; double end; } KiriVideoSegment;
+typedef struct { double start; double end; double speed; } KiriVideoSegment;
 typedef struct {
     unsigned kind;
     double start, end, x, y, width, height;
@@ -50,35 +50,51 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                 [audioOutputs addObject:[edited addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid]];
             }
             CMTime cursor = kCMTimeZero;
-            double previousEnd = 0;
             for (size_t index = 0; index < count; index++) {
-                double start = segments[index].start, end = segments[index].end;
-                if (!isfinite(start) || !isfinite(end) || start < previousEnd || end <= start || start >= duration || end > duration + 0.05) {
+                double start = segments[index].start, end = segments[index].end, speed = segments[index].speed;
+                if (!isfinite(start) || !isfinite(end) || start < 0 || !isfinite(speed) || speed < 0.25 || speed > 4 || end <= start || start >= duration || end > duration + 0.05) {
                     snprintf(error, capacity, "Invalid or overlapping video segments."); return false;
                 }
                 end = MIN(end, duration);
-                previousEnd = end;
+                for (size_t other = 0; other < index; other++) {
+                    if (start < MIN(segments[other].end, duration) && segments[other].start < end) {
+                        snprintf(error, capacity, "Overlapping video segments."); return false;
+                    }
+                }
                 CMTimeRange range = CMTimeRangeFromTimeToTime(CMTimeMakeWithSeconds(start, 600000), CMTimeMakeWithSeconds(end, 600000));
                 NSError *insertError = nil;
                 if (![video insertTimeRange:range ofTrack:track atTime:cursor error:&insertError]) {
                     snprintf(error, capacity, "%s", (insertError.localizedDescription ?: @"Could not insert video segment.").UTF8String); return false;
                 }
+                CMTime scaledDuration = CMTimeMultiplyByFloat64(range.duration, 1.0 / speed);
+                [video scaleTimeRange:CMTimeRangeMake(cursor, range.duration) toDuration:scaledDuration];
                 for (NSUInteger audioIndex = 0; audioIndex < audioTracks.count; audioIndex++) {
                     AVAssetTrack *audio = audioTracks[audioIndex];
                     // Audio may begin later or end sooner than video. Preserve that offset.
                     CMTimeRange intersection = CMTimeRangeGetIntersection(range, audio.timeRange);
                     if (CMTIMERANGE_IS_VALID(intersection) && CMTimeCompare(intersection.duration, kCMTimeZero) > 0) {
-                        CMTime position = CMTimeAdd(cursor, CMTimeSubtract(intersection.start, range.start));
+                        CMTime position = CMTimeAdd(cursor, CMTimeMultiplyByFloat64(CMTimeSubtract(intersection.start, range.start), 1.0 / speed));
                         if (![audioOutputs[audioIndex] insertTimeRange:intersection ofTrack:audio atTime:position error:&insertError]) {
                             snprintf(error, capacity, "%s", (insertError.localizedDescription ?: @"Could not insert audio segment.").UTF8String); return false;
                         }
+                        [audioOutputs[audioIndex] scaleTimeRange:CMTimeRangeMake(position, intersection.duration)
+                            toDuration:CMTimeMultiplyByFloat64(intersection.duration, 1.0 / speed)];
                     }
                 }
-                cursor = CMTimeAdd(cursor, range.duration);
+                cursor = CMTimeAdd(cursor, scaledDuration);
             }
             AVAssetExportSession *session = [[AVAssetExportSession alloc]
                 initWithAsset:edited presetName:AVAssetExportPresetHighestQuality];
             if (!session) { snprintf(error, capacity, "Could not create the MP4 exporter."); return false; }
+            AVMutableAudioMix *audioMix = [AVMutableAudioMix audioMix];
+            NSMutableArray<AVAudioMixInputParameters *> *audioParameters = [NSMutableArray array];
+            for (AVMutableCompositionTrack *audio in audioOutputs) {
+                AVMutableAudioMixInputParameters *parameters = [AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:audio];
+                parameters.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithmSpectral;
+                [audioParameters addObject:parameters];
+            }
+            audioMix.inputParameters = audioParameters;
+            session.audioMix = audioMix;
             CGRect bounds = CGRectApplyAffineTransform((CGRect){CGPointZero, track.naturalSize}, track.preferredTransform);
             double width = fabs(bounds.size.width), height = fabs(bounds.size.height);
             if (width < 2 || height < 2) { snprintf(error, capacity, "Invalid video dimensions."); return false; }
@@ -113,8 +129,8 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     double sourceTime = segments[count - 1].end;
                     double offset = 0;
                     for (size_t index = 0; index < count; index++) {
-                        double length = segments[index].end - segments[index].start;
-                        if (outputTime < offset + length) { sourceTime = segments[index].start + outputTime - offset; break; }
+                        double length = (MIN(segments[index].end, duration) - segments[index].start) / segments[index].speed;
+                        if (outputTime < offset + length) { sourceTime = segments[index].start + (outputTime - offset) * segments[index].speed; break; }
                         offset += length;
                     }
                     CIImage *image = request.sourceImage;
@@ -232,5 +248,74 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             snprintf(error, capacity, "%s", (exception.reason ?: @"MP4 export failed.").UTF8String);
             return false;
         }
+    }
+}
+
+// Read-only native inspection used by isolated media fixture tests.
+bool kiri_test_video_audio_stats(const char *path, double probeStart, double probeEnd,
+                                  double *start, double *duration, double *frequency) {
+    @autoreleasepool {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:
+            [[NSFileManager defaultManager] stringWithFileSystemRepresentation:path length:strlen(path)]] options:nil];
+        AVAssetTrack *audio = [asset tracksWithMediaType:AVMediaTypeAudio].firstObject;
+        if (!audio) return false;
+        *start = CMTimeGetSeconds(audio.timeRange.start);
+        *duration = CMTimeGetSeconds(audio.timeRange.duration);
+        AVAssetReader *reader = [[AVAssetReader alloc] initWithAsset:asset error:nil];
+        AVAssetReaderTrackOutput *output = [[AVAssetReaderTrackOutput alloc] initWithTrack:audio outputSettings:@{
+            AVFormatIDKey: @(kAudioFormatLinearPCM), AVSampleRateKey: @48000,
+            AVNumberOfChannelsKey: @1, AVLinearPCMBitDepthKey: @32,
+            AVLinearPCMIsFloatKey: @YES, AVLinearPCMIsNonInterleaved: @NO}];
+        [reader addOutput:output];
+        reader.timeRange = CMTimeRangeFromTimeToTime(CMTimeMakeWithSeconds(probeStart, 600000), CMTimeMakeWithSeconds(probeEnd, 600000));
+        if (![reader startReading]) return false;
+        size_t frames = 0, crossings = 0;
+        float previous = 0, peak = 0;
+        CMSampleBufferRef sample;
+        while ((sample = [output copyNextSampleBuffer])) {
+            CMBlockBufferRef buffer = CMSampleBufferGetDataBuffer(sample);
+            size_t length = buffer ? CMBlockBufferGetDataLength(buffer) : 0;
+            NSMutableData *bytes = [NSMutableData dataWithLength:length];
+            if (!buffer || CMBlockBufferCopyDataBytes(buffer, 0, length, bytes.mutableBytes) != kCMBlockBufferNoErr) {
+                CFRelease(sample); return false;
+            }
+            const float *values = bytes.bytes;
+            for (size_t index = 0; index < length / sizeof(float); index++) {
+                if (previous <= 0 && values[index] > 0) crossings++;
+                previous = values[index]; peak = MAX(peak, fabsf(previous)); frames++;
+            }
+            CFRelease(sample);
+        }
+        *frequency = frames && peak > 0.005 ? (double)crossings * 48000 / frames : 0;
+        return reader.status == AVAssetReaderStatusCompleted && frames > 0;
+#pragma clang diagnostic pop
+    }
+}
+
+// Fixture helper: delayed and truncated audio is intentionally independent of video.
+bool kiri_test_video_delayed_audio(const char *source, const char *destination) {
+    @autoreleasepool {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:
+            [[NSFileManager defaultManager] stringWithFileSystemRepresentation:source length:strlen(source)]] options:nil];
+        AVMutableComposition *composition = [AVMutableComposition composition];
+        AVMutableCompositionTrack *video = [composition addMutableTrackWithMediaType:AVMediaTypeVideo preferredTrackID:kCMPersistentTrackID_Invalid];
+        AVMutableCompositionTrack *audio = [composition addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid];
+        if (![video insertTimeRange:CMTimeRangeMake(kCMTimeZero, asset.duration)
+            ofTrack:[asset tracksWithMediaType:AVMediaTypeVideo].firstObject atTime:kCMTimeZero error:nil]) return false;
+        if (![audio insertTimeRange:CMTimeRangeMake(kCMTimeZero, CMTimeMake(3,2))
+            ofTrack:[asset tracksWithMediaType:AVMediaTypeAudio].firstObject atTime:CMTimeMake(1,2) error:nil]) return false;
+        AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:composition presetName:AVAssetExportPresetPassthrough];
+        session.outputURL = [NSURL fileURLWithPath:[[NSFileManager defaultManager]
+            stringWithFileSystemRepresentation:destination length:strlen(destination)]];
+        session.outputFileType = AVFileTypeMPEG4;
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        [session exportAsynchronouslyWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
+        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+        return session.status == AVAssetExportSessionStatusCompleted;
+#pragma clang diagnostic pop
     }
 }

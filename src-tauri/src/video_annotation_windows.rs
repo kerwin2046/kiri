@@ -132,7 +132,7 @@ pub(super) fn render(
     Ok(())
 }
 
-fn write_frame(
+pub(super) fn write_frame(
     writer: &IMFSinkWriter,
     stream: u32,
     frame: &RgbaImage,

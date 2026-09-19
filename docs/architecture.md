@@ -396,7 +396,7 @@ the canvas preview applies blur, pixelation or RGB solid masks before smoothstep
 A single-flight worker opens the readable source under the library lock,
 copies a snapshot outside the lock, then uses AVFoundation or Windows MediaComposition to concatenate the retained
 intervals and render a new MP4. Native
-metadata validates ordered, nonoverlapping source intervals (at most 128), effect
+metadata validates nonoverlapping source intervals in output order (at most 128), per-clip speed from 0.25 to 4, effect
 rectangles and source-time effect ranges (at most 128). macOS maps composition
 time back to source time for CI effects. Windows splits intervals at effect
 boundaries, crops zoom clips through MediaTranscoder into temporary native MP4
@@ -430,3 +430,10 @@ overlay, and never writes samples. It validates the capture session before and
 after permission requests. Cancellation and starting a recording invalidate the
 check, and closing the overlay ends it. Remembered microphone preferences do
 not automatically start this test.
+
+Clip order follows the submitted array; source intervals need not be chronological.
+Source-time effects remain attached to footage while the frontend projects their
+intersections into the continuous output timeline. Output duration is the sum of
+`(end - start) / speed`. macOS scales composition video/audio ranges and maps filter
+time back through clip speed. Windows renders source effects before its bounded
+frame/audio rate conversion. Viewer playback speed is independent of clip speed.

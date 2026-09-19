@@ -25,6 +25,21 @@ impl VideoExportPreset {
 pub struct VideoSegment {
     pub start: f64,
     pub end: f64,
+    #[serde(default = "default_segment_speed")]
+    pub speed: f64,
+}
+
+fn default_segment_speed() -> f64 {
+    1.0
+}
+impl Default for VideoSegment {
+    fn default() -> Self {
+        Self {
+            start: 0.0,
+            end: 0.0,
+            speed: 1.0,
+        }
+    }
 }
 
 #[repr(u32)]
@@ -287,10 +302,15 @@ fn validate_segments(
     if duration.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         bail!("Invalid video duration");
     }
-    let mut previous_end = 0.0;
     let mut validated = Vec::with_capacity(segments.len());
-    for &VideoSegment { start, end } in segments {
-        if !start.is_finite() || !end.is_finite() || start < previous_end || end <= start {
+    for &VideoSegment { start, end, speed } in segments {
+        if !start.is_finite()
+            || !end.is_finite()
+            || start < 0.0
+            || end <= start
+            || !speed.is_finite()
+            || !(0.25..=4.0).contains(&speed)
+        {
             bail!("Invalid or overlapping video segments");
         }
         let end = if let Some(duration) = duration {
@@ -301,8 +321,12 @@ fn validate_segments(
         } else {
             end
         };
-        validated.push(VideoSegment { start, end });
-        previous_end = end;
+        validated.push(VideoSegment { start, end, speed });
+    }
+    let mut ordered = validated.clone();
+    ordered.sort_by(|a, b| a.start.total_cmp(&b.start));
+    if ordered.windows(2).any(|pair| pair[0].end > pair[1].start) {
+        bail!("Overlapping video segments");
     }
     Ok(validated)
 }
@@ -476,13 +500,22 @@ mod tests {
             (0.0, 3.0, 2.0),
             (2.0, 2.01, 2.0),
         ] {
-            assert!(validate_segments(&[VideoSegment { start, end }], Some(duration)).is_err());
+            assert!(validate_segments(
+                &[VideoSegment {
+                    start,
+                    end,
+                    speed: 1.0
+                }],
+                Some(duration)
+            )
+            .is_err());
         }
         assert_eq!(
             validate_segments(
                 &[VideoSegment {
                     start: 0.2,
-                    end: 2.01
+                    end: 2.01,
+                    speed: 1.0
                 }],
                 Some(2.0)
             )
@@ -493,10 +526,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_overlaps_unordered_and_excess_segments() {
+    fn allows_reordering_but_rejects_overlaps_and_excess_segments() {
         let range = VideoSegment {
             start: 0.0,
             end: 1.0,
+            speed: 1.0,
         };
         assert!(validate_segments(&[], Some(3.0)).is_err());
         assert!(validate_segments(&[range; 129], Some(3.0)).is_err());
@@ -505,20 +539,22 @@ mod tests {
             &[
                 VideoSegment {
                     start: 2.0,
-                    end: 3.0
+                    end: 3.0,
+                    speed: 1.0
                 },
                 range
             ],
             Some(3.0)
         )
-        .is_err());
+        .is_ok());
         assert_eq!(
             validate_segments(
                 &[
                     range,
                     VideoSegment {
                         start: 1.0,
-                        end: 2.0
+                        end: 2.0,
+                        speed: 1.0
                     }
                 ],
                 Some(3.0)
@@ -527,6 +563,159 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    #[test]
+    fn segment_speed_defaults_and_limits() {
+        let legacy: VideoSegment = serde_json::from_str(r#"{"start":0,"end":1}"#).unwrap();
+        assert_eq!(legacy.speed, 1.0);
+        for speed in [f64::NAN, f64::INFINITY, 0.0, -1.0, 0.249, 4.001] {
+            assert!(validate_segments(&[VideoSegment { speed, ..legacy }], Some(2.0)).is_err());
+        }
+        for speed in [0.25, 0.5, 1.0, 2.0, 4.0] {
+            assert!(validate_segments(&[VideoSegment { speed, ..legacy }], Some(2.0)).is_ok());
+        }
+        let reordered = validate_segments(
+            &[
+                VideoSegment {
+                    start: 1.0,
+                    end: 2.0,
+                    speed: 2.0,
+                },
+                legacy,
+            ],
+            Some(2.0),
+        )
+        .unwrap();
+        assert_eq!(reordered[0].start, 1.0);
+        assert_eq!(reordered[1].speed, 1.0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_mixed_speed_reordering_keeps_audio_and_source_timed_effects() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("speed-source.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 64, 48, 30, 500_000, true).unwrap();
+        for index in 0..90 {
+            let color = if index < 30 {
+                [0, 0, 255, 255]
+            } else {
+                [255, 0, 0, 255]
+            };
+            let frame = color.repeat(64 * 48);
+            assert!(encoder.append_video(&frame, index).unwrap());
+        }
+        let mut audio = Vec::with_capacity(3 * 48_000 * 4);
+        for index in 0..3 * 48_000 {
+            let frequency = if index < 48_000 { 440.0 } else { 660.0 };
+            let sample = ((index as f64 * frequency * std::f64::consts::TAU / 48_000.0).sin()
+                * 12_000.0) as i16;
+            audio.extend_from_slice(&sample.to_le_bytes());
+            audio.extend_from_slice(&sample.to_le_bytes());
+        }
+        encoder.append_audio(&audio).unwrap();
+        encoder.finish().unwrap();
+        let before = std::fs::read(&source).unwrap();
+        let segments = [
+            VideoSegment {
+                start: 2.0,
+                end: 3.0,
+                speed: 2.0,
+            },
+            VideoSegment {
+                start: 0.0,
+                end: 1.0,
+                speed: 0.5,
+            },
+        ];
+        let effects = [VideoEffect {
+            kind: VideoEffectKind::Mask,
+            start: 2.2,
+            end: 2.6,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            ..Default::default()
+        }];
+        let annotations = [VideoAnnotation {
+            start: 0.25,
+            end: 0.5,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            kind: VideoAnnotationKind::Overlay,
+            amount: 0.0,
+            image_base64: annotation_png(image::RgbaImage::from_pixel(
+                2,
+                2,
+                image::Rgba([0, 255, 0, 255]),
+            )),
+        }];
+        let (output, width, height, duration) = export_video_with_annotations(
+            &source,
+            &segments,
+            &effects,
+            &annotations,
+            VideoExportPreset::Original,
+        )
+        .unwrap();
+        assert_eq!((width, height), (64, 48));
+        assert!((duration - 2.5).abs() < 0.06, "{duration}");
+        assert!(frame_at(&output, 0.2)
+            .get_pixel(32, 24)
+            .0
+            .iter()
+            .all(|channel| *channel < 35));
+        assert!(frame_at(&output, 0.4).get_pixel(32, 24)[2] > 180);
+        assert!(frame_at(&output, 0.8).get_pixel(32, 24)[0] > 180);
+        assert!(frame_at(&output, 1.2).get_pixel(32, 24)[1] > 180);
+        assert!(frame_at(&output, 2.2).get_pixel(32, 24)[0] > 180);
+        assert_audio_track(&output);
+        for (probe_start, probe_end, expected_frequency) in [(0.1, 0.4, 660.0), (0.8, 2.2, 440.0)] {
+            let (audio_start, audio_duration, frequency) =
+                audio_stats(&output, probe_start, probe_end);
+            assert!(audio_start.abs() < 0.05, "audio start {audio_start}");
+            assert!(
+                (audio_duration - 2.5).abs() < 0.08,
+                "audio duration {audio_duration}"
+            );
+            assert!(
+                (frequency - expected_frequency).abs() < 20.0,
+                "pitch {frequency} vs {expected_frequency}"
+            );
+        }
+        assert_eq!(before, std::fs::read(&source).unwrap());
+        std::fs::remove_file(output).unwrap();
+        // Source audio occupies only 0.5..2.0 seconds. The reordered first segment
+        // has no audio, and slowing 0..1 to two seconds must delay its tone to 1.5.
+        use std::ffi::{c_char, CString};
+        unsafe extern "C" {
+            fn kiri_test_video_delayed_audio(
+                source: *const c_char,
+                destination: *const c_char,
+            ) -> bool;
+        }
+        let delayed = directory.path().join("delayed.mp4");
+        let source_c = CString::new(source.to_str().unwrap()).unwrap();
+        let delayed_c = CString::new(delayed.to_str().unwrap()).unwrap();
+        assert!(unsafe { kiri_test_video_delayed_audio(source_c.as_ptr(), delayed_c.as_ptr()) });
+        let (output, _, _, duration) =
+            export_video(&delayed, &segments, &[], VideoExportPreset::Original).unwrap();
+        assert!((duration - 2.5).abs() < 0.06);
+        assert!(
+            audio_stats(&output, 0.8, 1.2).2 < 10.0,
+            "delayed audio must remain silent"
+        );
+        let frequency = audio_stats(&output, 1.7, 2.2).2;
+        assert!(
+            (frequency - 440.0).abs() < 20.0,
+            "delayed pitch {frequency}"
+        );
+        std::fs::remove_file(output).unwrap();
     }
 
     #[test]
@@ -658,6 +847,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 3.0,
+                    speed: 1.0,
                 }],
                 &[effect],
                 VideoExportPreset::Original,
@@ -742,6 +932,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 3.0,
+                    speed: 1.0,
                 }],
                 &[effect],
                 VideoExportPreset::Original,
@@ -907,6 +1098,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 3.0,
+                    speed: 1.0,
                 }],
                 &[],
                 &annotations,
@@ -941,6 +1133,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 3.0,
+                    speed: 1.0,
                 }],
                 &[],
                 &transparent_annotations,
@@ -1025,6 +1218,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 0.2,
+                    speed: 1.0,
                 }],
                 &[],
                 &[annotation],
@@ -1060,6 +1254,7 @@ mod tests {
             &[VideoSegment {
                 start: time,
                 end: time + 0.1,
+                speed: 1.0,
             }],
             &[],
             VideoExportPreset::Original,
@@ -1102,10 +1297,12 @@ mod tests {
             VideoSegment {
                 start: 0.0,
                 end: 1.0,
+                speed: 1.0,
             },
             VideoSegment {
                 start: 2.0,
                 end: 3.0,
+                speed: 1.0,
             },
         ];
         let effects = [
@@ -1153,6 +1350,34 @@ mod tests {
         assert_eq!(before, std::fs::read(&source).unwrap());
         assert_audio_track(&output);
         std::fs::remove_file(output).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn audio_stats(path: &Path, probe_start: f64, probe_end: f64) -> (f64, f64, f64) {
+        use std::ffi::{c_char, CString};
+        unsafe extern "C" {
+            fn kiri_test_video_audio_stats(
+                path: *const c_char,
+                probe_start: f64,
+                probe_end: f64,
+                start: *mut f64,
+                duration: *mut f64,
+                frequency: *mut f64,
+            ) -> bool;
+        }
+        let path = CString::new(path.to_str().unwrap()).unwrap();
+        let (mut start, mut duration, mut frequency) = (0.0, 0.0, 0.0);
+        assert!(unsafe {
+            kiri_test_video_audio_stats(
+                path.as_ptr(),
+                probe_start,
+                probe_end,
+                &mut start,
+                &mut duration,
+                &mut frequency,
+            )
+        });
+        (start, duration, frequency)
     }
 
     #[cfg(target_os = "macos")]
@@ -1213,6 +1438,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.2,
                     end: 0.8,
+                    speed: 1.0,
                 }],
                 &[],
                 preset,
@@ -1269,6 +1495,7 @@ mod tests {
             &[VideoSegment {
                 start: 0.0,
                 end: 0.2,
+                speed: 1.0,
             }],
             &[VideoEffect {
                 kind: VideoEffectKind::Mask,
@@ -1315,6 +1542,7 @@ mod tests {
                 &[VideoSegment {
                     start: 0.0,
                     end: 0.2,
+                    speed: 1.0,
                 }],
                 &[],
                 preset,
@@ -1330,6 +1558,7 @@ mod tests {
             &[VideoSegment {
                 start: 0.0,
                 end: 0.2,
+                speed: 1.0,
             }],
             &[VideoEffect {
                 kind: VideoEffectKind::Mask,

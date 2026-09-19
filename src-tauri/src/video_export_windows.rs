@@ -23,6 +23,8 @@ use windows::{
 
 #[path = "video_annotation_windows.rs"]
 mod annotations;
+#[path = "video_speed_windows.rs"]
+mod speed;
 
 // WinRT rejects forward slashes even though Rust file APIs accept them.
 // Keep UTF-16 intact so paths containing non-ASCII names remain readable.
@@ -75,12 +77,48 @@ pub(super) fn platform_export(
     validate_annotation_duration(annotations, duration)?;
     // Reject ambiguous rotated coordinates instead of silently exposing a masked region.
     // Kiri's own capture encoder writes upright frames without rotation metadata.
-    if (!effects.is_empty() || !annotations.is_empty())
+    let has_speed_changes = segments.iter().any(|segment| segment.speed != 1.0);
+    if (!effects.is_empty() || !annotations.is_empty() || has_speed_changes)
         && properties.Orientation()? != VideoOrientation::Normal
     {
         bail!("Windows cannot apply video effects to rotated source videos; export an upright copy first");
     }
     let profile = MediaEncodingProfile::CreateFromFileAsync(&input)?.join()?;
+    if has_speed_changes {
+        // Render source-time edits first, in the requested slice order. The speed
+        // pass then operates on contiguous master intervals, including reorders.
+        let staging = tempfile::Builder::new()
+            .prefix("kiri-speed-master-")
+            .tempdir()?;
+        let master = staging.path().join("ordered-master.mp4");
+        let normal_segments: Vec<_> = segments
+            .iter()
+            .map(|segment| VideoSegment {
+                speed: 1.0,
+                ..*segment
+            })
+            .collect();
+        platform_export(
+            source,
+            &master,
+            &normal_segments,
+            effects,
+            annotations,
+            preset,
+        )?;
+        let master_profile =
+            MediaEncodingProfile::CreateFromFileAsync(&storage_file(&master)?)?.join()?;
+        speed::render(&master, output, &segments, &master_profile)?;
+        let actual = storage_file(output)?
+            .Properties()?
+            .GetVideoPropertiesAsync()?
+            .join()?;
+        return Ok((
+            i64::from(actual.Width()?),
+            i64::from(actual.Height()?),
+            actual.Duration()?.Duration as f64 / 10_000_000.0,
+        ));
+    }
     let requires_frame_render = !annotations.is_empty()
         || effects.iter().any(|effect| {
             (effect.kind == VideoEffectKind::Zoom && effect.transition > 0.0)
@@ -471,10 +509,12 @@ mod tests {
                 VideoSegment {
                     start: 0.5,
                     end: 1.5,
+                    speed: 1.0,
                 },
                 VideoSegment {
                     start: 2.5,
                     end: 3.5,
+                    speed: 1.0,
                 },
             ],
             &[
@@ -578,10 +618,12 @@ mod tests {
                 VideoSegment {
                     start: 0.5,
                     end: 1.5,
+                    speed: 1.0,
                 },
                 VideoSegment {
                     start: 2.5,
                     end: 3.5,
+                    speed: 1.0,
                 },
             ],
             &[],
@@ -659,6 +701,7 @@ mod tests {
             &[VideoSegment {
                 start: 0.0,
                 end: 4.0,
+                speed: 1.0,
             }],
             &[
                 VideoEffect {
@@ -768,6 +811,83 @@ mod tests {
             held[1] > 180 && held[0] < 60 && held[2] < 60,
             "zoom never reached target: {held:?}"
         );
+        let speed_output = directory.join("reordered-speeds.mp4");
+        let (_, _, speed_duration) = platform_export(
+            &source_path,
+            &speed_output,
+            &[
+                VideoSegment {
+                    start: 2.3,
+                    end: 2.9,
+                    speed: 0.25,
+                },
+                VideoSegment {
+                    start: 0.2,
+                    end: 0.8,
+                    speed: 2.0,
+                },
+                VideoSegment {
+                    start: 1.0,
+                    end: 1.8,
+                    speed: 4.0,
+                },
+            ],
+            &[VideoEffect {
+                kind: VideoEffectKind::Mask,
+                start: 2.45,
+                end: 2.75,
+                x: 0.3,
+                y: 0.3,
+                width: 0.1,
+                height: 0.1,
+                ..Default::default()
+            }],
+            &[],
+            VideoExportPreset::Original,
+        )?;
+        assert!(
+            (speed_duration - 2.9).abs() < 0.12,
+            "mixed-speed duration wrong: {speed_duration}"
+        );
+        let speed_clip = MediaClip::CreateFromFileAsync(&storage_file(&speed_output)?)?.join()?;
+        assert!(
+            speed_clip.EmbeddedAudioTracks()?.Size()? > 0,
+            "speed export dropped audio"
+        );
+        let sped = MediaComposition::new()?;
+        sped.Clips()?.Append(&speed_clip)?;
+        for time in [0.3, 2.1] {
+            let green = pixel(&sped, "speeds", time, 100, 56)?;
+            assert!(
+                green[1] > 180 && green[0] < 60 && green[2] < 60,
+                "reordered slow slice or effect timing wrong at {time}: {green:?}"
+            );
+        }
+        let masked = pixel(&sped, "speeds", 1.2, 100, 56)?;
+        assert!(
+            masked.iter().all(|value| *value < 35),
+            "source-time mask failed to slow with its slice: {masked:?}"
+        );
+        for time in [2.55, 2.8] {
+            let red = pixel(&sped, "speeds", time, 100, 56)?;
+            assert!(
+                red[0] > 180 && red[1] < 60 && red[2] < 60,
+                "reordered accelerated slice wrong at {time}: {red:?}"
+            );
+        }
+        // The documented Windows policy changes pitch with speed. A real decoded
+        // sine wave proves audio is neither muted nor accidentally left at 1x.
+        for (start, end, expected_hz) in
+            [(0.9, 1.1, 110.0), (2.51, 2.59, 880.0), (2.77, 2.83, 1760.0)]
+        {
+            let (rms, frequency) = speed::audio_stats(&speed_output, start, end)?;
+            assert!(
+                rms > 1000.0,
+                "speed audio is silent in {start}..{end}: RMS={rms}"
+            );
+            assert!((frequency - expected_hz).abs() < expected_hz * 0.15 + 15.0,
+                "audio speed differs from video in {start}..{end}: {frequency}Hz vs {expected_hz}Hz");
+        }
         Ok(())
     }
 

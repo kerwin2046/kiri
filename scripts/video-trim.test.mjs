@@ -40,3 +40,37 @@ test('split boundaries and exhausted timeline remain safe',()=>{
   assert.equal(validSegments([{start:0,end:.6},{start:.5,end:1}],1),false);
   assert.equal(nextPlayableTime([],0),null);
 });
+
+import {segmentSpeed,moveSegment,sourceAtOutput,timelineSegments,projectTimedRange} from '../src/windows/video-trim.js';
+test('reordered clips validate source non-overlap while output follows array and individual speeds',()=>{
+ const clips=[{start:8,end:12,speed:2},{start:0,end:4,speed:.5},{start:5,end:7}];
+ assert.equal(validSegments(clips,12),true);assert.equal(timelineDuration(clips),12);
+ assert.deepEqual(timelineSegments(clips).map(c=>[c.start,c.end]),[[0,2],[2,10],[10,12]]);
+ assert.deepEqual(sourceAtOutput(clips,2),{index:1,time:0});
+ assert.deepEqual(sourceAtOutput(clips,6),{index:1,time:2});
+ assert.deepEqual(sourceAtOutput(clips,12),{index:2,time:7});
+ assert.equal(outputTime(clips,10),1);assert.equal(outputTime(clips,2),6);
+ for(const speed of [0,.2,4.1,NaN])assert.equal(validSegments([{start:0,end:1,speed}],1),false);
+});
+test('source adjacency uses index hints and trim bounds use source order after reordering',()=>{
+ const clips=[{start:4,end:8,speed:2},{start:0,end:4}];
+ assert.equal(outputTime(clips,4,0),0);assert.equal(outputTime(clips,4,1),6);
+ assert.equal(trimSegment(clips,0,'start',1,10)[0].start,4);
+ assert.equal(trimSegment(clips,1,'end',7,10)[1].end,4);
+ assert.equal(trimSegment(clips,0,'end',20,10)[0].end,10);
+});
+test('split and reorder preserve speed and undo can restore original document without mutation',()=>{
+ const original=[{start:0,end:8,speed:2},{start:9,end:12,speed:.5}];
+ const split=splitSegment(original,4),reordered=moveSegment(split,2,0);
+ assert.deepEqual(reordered,[original[1],{start:0,end:4,speed:2},{start:4,end:8,speed:2}]);
+ assert.equal(timelineDuration(reordered),timelineDuration(original));assert.equal(original.length,2);
+ assert.equal(segmentSpeed({start:0,end:1}),1);
+ assert.strictEqual(moveSegment(original,0,0),original);
+});
+test('timed effects project onto output order and speed without changing source times',()=>{
+ const clips=[{start:8,end:12,speed:2},{start:0,end:4,speed:.5}];
+ const result=projectTimedRange(clips,2,10);
+ assert.deepEqual(result.map(r=>[r.index,r.start,r.end,r.sourceStart,r.sourceEnd]),[[0,0,1,8,10],[1,6,10,2,4]]);
+ assert.deepEqual(projectTimedRange(clips,4,8),[]);
+ assert.deepEqual(clips,[{start:8,end:12,speed:2},{start:0,end:4,speed:.5}]);
+});
