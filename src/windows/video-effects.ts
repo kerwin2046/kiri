@@ -33,11 +33,17 @@ export function validVideoEffect(effect: VideoEffect, effects: VideoEffect[], du
   return true;
 }
 
+export function defaultOverlayRange(time: number, duration: number): {start: number; end: number} {
+  const start = clamp(time, 0, Math.max(0, duration - Math.min(1, duration)));
+  return {start, end: Math.min(duration, start + 3)};
+}
+
 export function createVideoEffect(kind: VideoEffect["kind"], time: number, duration: number, effects: VideoEffect[]): VideoEffect | null {
   if (effects.length >= 128) return null;
   if (!Number.isFinite(time) || !Number.isFinite(duration) || duration < 0.05) return null;
-  const start = clamp(time, 0, duration - 0.05);
-  let end = Math.min(duration, start + 3);
+  const range = defaultOverlayRange(time, duration);
+  const start = range.start;
+  let end = range.end;
   if (kind === "zoom") {
     if (effects.some(effect => effect.kind === "zoom" && effect.start <= start && effect.end > start)) return null;
     for (const effect of effects) if (effect.kind === "zoom" && effect.start > start) end = Math.min(end, effect.start);

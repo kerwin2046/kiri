@@ -5,7 +5,7 @@ import { fmt, t } from "../i18n";
 import { segmentSpeed, timelineSegments, projectTimedRange, sourceAtOutput, moveSegment, outputTime, splitSegment, timelineDuration, trimSegment, validSegments, videoTimeLabel, type VideoSegment } from "./video-trim.js";
 import { useVideoThumbnails } from "./useVideoThumbnails";
 import { VideoEffectsControls, VideoEffectsOverlay } from "./VideoEffects";
-import {videoZoomViewport, type VideoEffect} from "./video-effects";
+import {defaultOverlayRange, videoZoomViewport, type VideoEffect} from "./video-effects";
 import {paintVideoMasks} from "./video-effect-render";
 import "./video-trim.css";
 import {VideoOutputEffectTracks} from "./VideoOutputEffectTracks";
@@ -313,7 +313,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       if(current.annotations.length+current.stickers.length>=128||current.stickers.reduce((sum,item)=>sum+item.dataUrl.length,0)+dataUrl.length>32*1024*1024)throw Error("Sticker limit");
       const ratio=image.naturalWidth/image.naturalHeight,sourceRatio=sourceSize.width/sourceSize.height;
       const width=Math.min(.3,.3*ratio/sourceRatio),height=width*sourceRatio/ratio;
-      const start=Math.min(Math.max(0,video.current?.currentTime??time),Math.max(0,duration-.05)),end=Math.min(duration,start+3);
+      const {start,end}=defaultOverlayRange(video.current?.currentTime??time,duration);
       const item:VideoSticker={id:`sticker-${crypto.randomUUID()}`,start,end,x:(1-width)/2,y:(1-height)/2,width,height,dataUrl};
       stickerImages.current.set(item.id,image);apply({...current,stickers:[...current.stickers,item]});setAnnotating(false);setAnnotationId(null);setEffectId(item.id);seek(start);
     }catch{if(alive.current)setStickerError(true);}finally{if(alive.current)setImporting(false);}
@@ -353,8 +353,8 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       const mark=incoming.get(item.mark.id);return mark?[{...item,mark}]:[];
     });
     const existing=new Set(current.annotations.map(item=>item.mark.id));
-    const start=Math.max(0,Math.min(time,duration-.05));
-    const added=marks.filter(mark=>!existing.has(mark.id)).map(mark=>({id:`annotation-${mark.id}`,mark,start,end:Math.min(duration,start+3)}));
+    const {start,end}=defaultOverlayRange(time,duration);
+    const added=marks.filter(mark=>!existing.has(mark.id)).map(mark=>({id:`annotation-${mark.id}`,mark,start,end}));
     if(retained.length+added.length>128){setAnnotationRevision(value=>value+1);setError(true);return;}
     apply({...current,annotations:[...retained,...added]});
     if(added.length)setAnnotationId(added[added.length-1].id);

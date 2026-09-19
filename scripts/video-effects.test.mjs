@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import ts from "typescript";
 const source = readFileSync(new URL("../src/windows/video-effects.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.ESNext}}).outputText;
-const {activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, resizeVideoEffectFromHandle, videoZoomViewport, validVideoEffect} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const {defaultOverlayRange, activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, resizeVideoEffectFromHandle, videoZoomViewport, validVideoEffect} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 
 test("new zoom clips at the next zoom and refuses overlapping placement", () => {
   const existing = {...createVideoEffect("zoom", 4, 10, []), id:"first"};
@@ -100,4 +100,11 @@ test("effect styles reject invalid parameters and preserve old payload defaults"
  for(const patch of [{strength:NaN},{strength:1.1},{color:-1},{color:0x1000000},{color:1.2},{transition:3},{maskStyle:"unknown"}])assert.equal(validVideoEffect({...mask,...patch},[],5),false);
  const {maskStyle,strength,color,...legacy}=mask;
  assert.ok(validVideoEffect(legacy,[],5));
+});
+
+test("new overlays at the end remain visible for one second or the whole short clip", () => {
+  assert.deepEqual(defaultOverlayRange(10, 10), {start:9, end:10});
+  assert.deepEqual(defaultOverlayRange(9.95, 10), {start:9, end:10});
+  assert.deepEqual(defaultOverlayRange(.2, .2), {start:0, end:.2});
+  assert.deepEqual(defaultOverlayRange(2, 10), {start:2, end:5});
 });
