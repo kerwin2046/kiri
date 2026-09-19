@@ -62,6 +62,7 @@ export const COLOR_LABELS: Record<ColorPreset, string> = {
 export type TextBackgroundStyle = "transparent" | "dark";
 export type MosaicIntensity = "soft" | "standard" | "strong";
 export type MosaicStyle = "pixel" | "blur";
+export type MosaicShape = "brush" | "rectangle" | "ellipse";
 
 export const MOSAIC_VIEW_BLOCK_SIZE: Record<MosaicIntensity, number> = {
   soft: 7,
@@ -90,6 +91,8 @@ export type AnnotationMark =
       brushDiameter: number;
       intensity: MosaicIntensity;
       style: MosaicStyle;
+      /** Omitted in older documents: a freehand brush stroke. */
+      shape?: MosaicShape;
     };
 
 /**
@@ -289,6 +292,12 @@ function hitTestMark(
       return containsPadded(r, p, 7 * scale.x, 6 * scale.y);
     }
     case "mosaic":
+      if (mark.shape && mark.shape !== "brush") {
+        const b = pointBounds(mark.points);
+        if (mark.shape === "rectangle") return containsPadded(b, p, 4 * scale.x, 4 * scale.y);
+        const rx = b.width / 2 + 4 * scale.x, ry = b.height / 2 + 4 * scale.y;
+        return ((p.x-b.x-b.width/2)/rx)**2 + ((p.y-b.y-b.height/2)/ry)**2 <= 1;
+      }
       return (
         polylineDistance(p, mark.points) <=
         mark.brushDiameter / 2 + 4 * scale.radial
@@ -348,7 +357,7 @@ export function translateMark(mark: AnnotationMark, by: Point, bounds: Rect): An
       return { ...mark, rect: { ...mark.rect, x: mark.rect.x + tx, y: mark.rect.y + ty } };
     }
     case "mosaic": {
-      const b = pointBoundsPadded(mark.points, mark.brushDiameter / 2);
+      const b = selectionBounds(mark);
       const tx = clampTranslation(by.x, minX(b), maxX(b), minX(bounds), maxX(bounds));
       const ty = clampTranslation(by.y, minY(b), maxY(b), minY(bounds), maxY(bounds));
       return { ...mark, points: mark.points.map((p) => ({ x: p.x + tx, y: p.y + ty })) };
@@ -379,14 +388,70 @@ function clampTranslation(
   return Math.min(Math.max(delta, boundMin - markMin), boundMax - markMax);
 }
 
-export function resizeRectangleMark(
-  mark: AnnotationMark,
-  handle: string,
-  point: Point,
-  bounds: Rect,
-): AnnotationMark {
-  if (mark.kind !== "rectangle") return mark;
-  return { ...mark, rect: resizeRect(mark.rect, handle, point, bounds) };
+/** Resizes the editable object, including freehand coverage, from its original bounds. */
+export function resizeAnnotationMark(mark: AnnotationMark, handle: string, point: Point, bounds: Rect): AnnotationMark {
+  if (mark.kind === "line" || mark.kind === "arrow") return mark;
+  const before = selectionBounds(mark);
+  const next = resizeRect(before, handle, point, bounds);
+  if (mark.kind === "rectangle") return {...mark, rect: next};
+  if (mark.kind === "text") {
+    // Text scales uniformly so a corner drag does not distort glyphs or rewrap words.
+    const horizontal = handle === "left" || handle === "right";
+    const vertical = handle === "top" || handle === "bottom";
+    let factor = horizontal ? next.width / before.width : vertical ? next.height / before.height :
+      Math.max(next.width / before.width, next.height / before.height);
+    factor = Math.max(.1, Math.min(factor, 4096 / mark.fontSize));
+    const left = handle.includes("Left") || handle === "left";
+    const top = handle.startsWith("top");
+    const right = handle.includes("Right") || handle === "right";
+    const bottom = handle.startsWith("bottom");
+    const anchorX = left ? maxX(before) : right ? before.x : before.x+before.width/2;
+    const anchorY = top ? maxY(before) : bottom ? before.y : before.y+before.height/2;
+    const roomX = left ? anchorX-bounds.x : right ? maxX(bounds)-anchorX : 2*Math.min(anchorX-bounds.x,maxX(bounds)-anchorX);
+    const roomY = top ? anchorY-bounds.y : bottom ? maxY(bounds)-anchorY : 2*Math.min(anchorY-bounds.y,maxY(bounds)-anchorY);
+    factor = Math.max(.01,Math.min(factor,roomX/before.width,roomY/before.height));
+    const width=before.width*factor,height=before.height*factor;
+    return {...mark,fontSize:mark.fontSize*factor,rect:{x:left?anchorX-width:right?anchorX:anchorX-width/2,y:top?anchorY-height:bottom?anchorY:anchorY-height/2,width,height}};
+  }
+  if (mark.kind === "mosaic" && mark.shape && mark.shape !== "brush") {
+    return {...mark,points:[{x:next.x,y:next.y},{x:maxX(next),y:maxY(next)}]};
+  }
+  const pointsBounds = pointBounds(mark.points);
+  const oldSize = mark.kind === "pen" ? mark.width : mark.brushDiameter;
+  const factor = Math.min(next.width/Math.max(1,before.width),next.height/Math.max(1,before.height));
+  // A horizontal or vertical stroke still needs to grow along its thickness axis.
+  const size = Math.max(.1,Math.min(4096,next.width,next.height,
+    pointsBounds.width<.001||pointsBounds.height<.001 ? Math.min(next.width,next.height) : oldSize*factor));
+  const points = mark.points.map(p=>({
+    x:next.x+size/2+(pointsBounds.width>.001?(p.x-pointsBounds.x)/pointsBounds.width*(next.width-size):0),
+    y:next.y+size/2+(pointsBounds.height>.001?(p.y-pointsBounds.y)/pointsBounds.height*(next.height-size):0),
+  }));
+  return mark.kind === "pen" ? {...mark,points,width:size} : {...mark,points,brushDiameter:size};
+}
+
+export function changeMosaicShape(mark: AnnotationMark, shape: MosaicShape): AnnotationMark {
+  if (mark.kind !== "mosaic" || (mark.shape ?? "brush") === shape) return mark;
+  const b=selectionBounds(mark);
+  if (shape !== "brush") return {...mark,shape,points:[{x:b.x,y:b.y},{x:maxX(b),y:maxY(b)}]};
+  const diameter=Math.min(b.width,b.height);
+  return {...mark,shape,brushDiameter:Math.max(.1,diameter),points:b.width>=b.height?
+    [{x:b.x+diameter/2,y:b.y+b.height/2},{x:maxX(b)-diameter/2,y:b.y+b.height/2}]:
+    [{x:b.x+b.width/2,y:b.y+diameter/2},{x:b.x+b.width/2,y:maxY(b)-diameter/2}]};
+}
+
+/** Apply only the changed property; selecting an object never replaces its styling. */
+export function applyAnnotationAppearance(mark: AnnotationMark, patch: Partial<AppearanceSettings>): AnnotationMark {
+  if(mark.kind === "mosaic")return {...mark,
+    ...(patch.mosaicBrushDiameter===undefined?{}:{brushDiameter:patch.mosaicBrushDiameter}),
+    ...(patch.mosaicIntensity===undefined?{}:{intensity:patch.mosaicIntensity}),
+    ...(patch.mosaicStyle===undefined?{}:{style:patch.mosaicStyle})};
+  const color=patch.colorPreset??mark.color;
+  if(mark.kind === "text"){
+    const fontSize=patch.textFontSize??mark.fontSize,scale=fontSize/mark.fontSize;
+    return {...mark,color,fontSize,background:patch.textBackgroundStyle??mark.background,
+      rect:{...mark.rect,width:mark.rect.width*scale,height:mark.rect.height*scale}};
+  }
+  return {...mark,color,width:(mark.kind==="pen"?patch.penWidth:patch.shapeWidth)??mark.width};
 }
 
 // Reuse the SelectionGeometry resize algorithm from geom.ts.
@@ -425,6 +490,7 @@ export function selectionBounds(mark: AnnotationMark): Rect {
       return standardized(mark.rect);
     case "mosaic": {
       const b = pointBounds(mark.points);
+      if (mark.shape && mark.shape !== "brush") return b;
       const pad = mark.brushDiameter / 2;
       return { x: b.x - pad, y: b.y - pad, width: b.width + pad * 2, height: b.height + pad * 2 };
     }

@@ -36,7 +36,7 @@ export function rasterizeVideoAnnotations(tracks:TimedVideoAnnotation[], sourceS
     let kind:RasterizedVideoAnnotation["kind"]="overlay",amount=0;
     if(mark.kind==="mosaic") {
       if(mark.points.length===0) continue;
-      clipToMosaicStroke(ctx,mark.points,mark.brushDiameter);
+      clipToMosaicStroke(ctx,mark.points,mark.brushDiameter,mark.shape);
       ctx.fillStyle="#fff";ctx.fillRect(0,0,width,height);ctx.restore();
       kind=mark.style==="blur"?"blur":"pixelate";
       amount=(mark.style==="blur"?mosaicBlurRadius(mark.brushDiameter,mark.intensity,{x:1,y:1,stroke:1}):MOSAIC_VIEW_BLOCK_SIZE[mark.intensity])/width;

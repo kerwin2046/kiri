@@ -1,4 +1,4 @@
-import {useRef,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import type {KeyboardEvent,PointerEvent} from "react";
 import {Focus,Shield,Trash2,Scan,Frame,SunMoon,ChevronLeft,ChevronRight,ChevronDown} from "lucide-react";
 import {t} from "../i18n";
@@ -108,6 +108,12 @@ export function VideoEffectsOverlay(props: VideoEffectsProps) {
     props.onChange(cancel ? gesture.current.original : gesture.current.latest, false);
     gesture.current = null;
   }
+  useEffect(()=>{
+    const key=(event:globalThis.KeyboardEvent)=>{
+      if(event.key==="Escape"&&gesture.current){event.preventDefault();event.stopImmediatePropagation();finish(true);}
+    };
+    window.addEventListener("keydown",key,true);return()=>window.removeEventListener("keydown",key,true);
+  },[props.onChange]);
   function keyboard(event: KeyboardEvent<HTMLElement>, effect: VideoEffect, handle: EffectHandle | null) {
     if (props.disabled || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();

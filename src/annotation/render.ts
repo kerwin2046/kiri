@@ -5,6 +5,7 @@ import type {
   AnnotationMark,
   ColorPreset,
   MosaicIntensity,
+  MosaicShape,
   TextBackgroundStyle,
 } from "./model";
 import { COLOR_HEX, MOSAIC_VIEW_BLOCK_SIZE, arrowHeadPoints, selectionBounds } from "./model";
@@ -112,6 +113,7 @@ function exportStrokeSize(size: number, r: RenderContext): number {
 
 function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[]) {
   if (points.length === 0) return;
+  if(points.length===1){ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.arc(points[0].x,points[0].y,ctx.lineWidth/2,0,Math.PI*2);ctx.fill();return;}
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   for (let i = 1; i < points.length; i++) {
@@ -278,9 +280,16 @@ function mosaicStrokeBounds(points: Point[], diameter: number, region: Rect): Re
   return clipped.width >= 1 && clipped.height >= 1 ? clipped : null;
 }
 
-export function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number) {
+export function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number, shape: MosaicShape = "brush") {
   ctx.save();
   ctx.beginPath();
+  if(shape!=="brush" && points.length===2){
+    const x=Math.min(points[0].x,points[1].x),y=Math.min(points[0].y,points[1].y);
+    const width=Math.abs(points[1].x-points[0].x),height=Math.abs(points[1].y-points[0].y);
+    if(shape==="ellipse")ctx.ellipse(x+width/2,y+height/2,width/2,height/2,0,0,Math.PI*2);
+    else ctx.rect(x,y,width,height);
+    ctx.clip();return;
+  }
   // A filled capsule joins each pair of samples even when fast motion skips pixels.
   // Disks and connecting quads share their winding, so overlaps cannot cancel out.
   const radius = diameter / 2;
@@ -303,7 +312,7 @@ function drawMosaicMark(
   ctx: CanvasRenderingContext2D,
 ) {
   const region = { x: 0, y: 0, width: r.regionSize.width, height: r.regionSize.height };
-  const viewRect = mosaicStrokeBounds(mark.points, mark.brushDiameter, region);
+  const viewRect = mosaicStrokeBounds(mark.points, mark.shape && mark.shape!=="brush"?0:mark.brushDiameter, region);
   if (!viewRect) return;
 
   // Source-pixel crop: mark coordinates are region-local; add the source
@@ -344,7 +353,7 @@ function drawMosaicMark(
     const offCtx = off.getContext("2d")!;
     offCtx.drawImage(r.sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
     blurCanvas(off,sourceRadius);
-    clipToMosaicStroke(ctx, points, clipDiameter);
+    clipToMosaicStroke(ctx, points, clipDiameter, mark.shape);
     ctx.drawImage(off, 0, 0, sw, sh, drawX+(sx-cx)*drawW/cw, drawY+(sy-cy)*drawH/ch, sw*drawW/cw, sh*drawH/ch);
     ctx.restore();
     return;
@@ -362,7 +371,7 @@ function drawMosaicMark(
   smallCtx.imageSmoothingEnabled = false;
   smallCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, smallW, smallH);
 
-  clipToMosaicStroke(ctx, points, clipDiameter);
+  clipToMosaicStroke(ctx, points, clipDiameter, mark.shape);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(small, 0, 0, smallW, smallH, drawX, drawY, drawW, drawH);
   ctx.restore();
@@ -513,7 +522,7 @@ function drawSelectionOutline(
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.setLineDash([]);
-  if (mark.kind === "rectangle") {
+  {
     const handles = [
       { x: minX(bounds), y: minY(bounds) },
       { x: (minX(bounds) + maxX(bounds)) / 2, y: minY(bounds) },

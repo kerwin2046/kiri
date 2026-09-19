@@ -9,7 +9,7 @@ export function VideoEffectSlider(props:{label:string;value:number;min:number;ma
     props.onChange(latest.current,true);
   }
   function finish(){if(!dragging.current)return;dragging.current=false;props.onChange(latest.current,false);}
-  return <label className="kiri-effect-slider"><span>{props.label}<output>{props.text}</output></span><input type="range" className="kiri-range" value={props.value} min={props.min} max={props.max} step={props.step} disabled={props.disabled}
+  return <label className="kiri-effect-slider"><span>{props.label}<output>{props.text}</output></span><input type="range" aria-label={props.label} className="kiri-range" value={props.value} min={props.min} max={props.max} step={props.step} disabled={props.disabled}
     onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus();dragging.current=true;event.currentTarget.setPointerCapture(event.pointerId);change(event.clientX,event.currentTarget);}}
     onPointerMove={event=>{if(dragging.current)change(event.clientX,event.currentTarget);}}
     onChange={event=>{latest.current=Number(event.target.value);props.onChange(latest.current,dragging.current);}}

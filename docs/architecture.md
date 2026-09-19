@@ -453,7 +453,12 @@ saved choices are not migrated. Image stickers live in the edit/undo document as
 normalized local PNGs with source-time ranges and normalized geometry. They use
 the existing native annotation overlay export boundary, after other annotations
 and before privacy masks/zoom. Static stickers preserve alpha; corner resizing
-preserves aspect ratio. Mask style samples use the actual composed source frame
-and the same frontend effect renderer as preview. No image is uploaded.
+preserves aspect ratio. Mask styles are named choices; their result is shown in the central composed
+picture. The annotation inspector derives its controls from the selected mark,
+with explicit live style changes and one history entry per slider gesture.
+Mosaic documents optionally carry a brush, rectangle or ellipse shape; omitted
+shape fields retain legacy freehand coverage. Preview and video rasterization
+share the same clipping path. A stable picture surface handles selecting and
+dragging between annotations, stickers and privacy effects without losing the pointer. No image is uploaded.
 
 Editor transport and export follow [ADR 0041](adr/0041-single-canvas-video-editing.md). Export settings live in the header, playback has one control, and only the timeline track list scrolls.

@@ -430,3 +430,60 @@ test('sparse mosaic samples cover the connecting stroke without overlap holes',a
  assert.ok(diagonal(55,55));assert.ok(diagonal(65,100));assert.equal(diagonal(60,30),false);
  assert.ok(coverage([{x:50,y:50},{x:50,y:50}])(50,50));
 });
+
+test("mosaic regions preserve their shape through validation and legacy brushes remain unchanged",()=>{
+  const base=ALL_MARKS.find(mark=>mark.kind==="mosaic");
+  for(const shape of ["rectangle","ellipse"]){
+    const mark={...base,shape,points:[{x:20,y:30},{x:120,y:80}]};
+    assert.deepEqual(parseAnnotationDocument(documentWith([mark])).marks,[mark]);
+    assert.throws(()=>parseAnnotationDocument(documentWith([{...mark,points:[{x:20,y:30}]}])),/two corners/);
+  }
+  assert.throws(()=>parseAnnotationDocument(documentWith([{...base,shape:"unknown"}])),/unknown/);
+});
+
+test("selected annotation appearance changes affect only the requested properties",async()=>{
+  const {applyAnnotationAppearance}=await loadAnnotationModel();
+  for(const mark of ALL_MARKS){
+    const changed=applyAnnotationAppearance(mark,{colorPreset:"black",mosaicStyle:"blur"});
+    assert.equal(changed.id,mark.id);
+    if(mark.kind==="mosaic"){
+      assert.equal(changed.style,"blur");assert.equal(changed.brushDiameter,mark.brushDiameter);
+      assert.deepEqual(changed.points,mark.points);
+    }else{assert.equal(changed.color,"black");assert.deepEqual(changed.rect,mark.rect);}
+  }
+  const text=ALL_MARKS.find(mark=>mark.kind==="text");
+  const large=applyAnnotationAppearance(text,{textFontSize:36});
+  assert.equal(large.rect.width,text.rect.width*2);
+  assert.equal(large.rect.height,text.rect.height*2);
+  assert.equal(large.text,text.text);
+});
+
+test("mosaic handles reshape an area and undo restores the original brush",async()=>{
+  const {resizeAnnotationMark,selectionBounds,changeMosaicShape,AnnotationHistory,markIndexAt}=await loadAnnotationModel();
+  const brush={...ALL_MARKS.find(mark=>mark.kind==="mosaic"),points:[{x:50,y:50},{x:150,y:50}],brushDiameter:20};
+  const bounds={x:0,y:0,width:640,height:360};
+  const taller=resizeAnnotationMark(brush,"bottom",{x:100,y:100},bounds);
+  assert.equal(selectionBounds(taller).height,60);
+  assert.equal(selectionBounds(taller).y,40);
+  assert.equal(selectionBounds(taller).width,120);
+  const ellipse=changeMosaicShape(brush,"ellipse");
+  const changed=resizeAnnotationMark(ellipse,"bottomRight",{x:200,y:130},bounds);
+  assert.deepEqual(selectionBounds(changed),{x:40,y:40,width:160,height:90});
+  assert.equal(markIndexAt([changed],{x:120,y:85}),0);
+  assert.equal(markIndexAt([changed],{x:40,y:40}),null,"an ellipse's bounding corner is not covered");
+  const history=new AnnotationHistory([brush]);history.replace(0,ellipse);history.replace(0,changed);
+  history.undo();assert.deepEqual(history.elements,[ellipse]);history.undo();assert.deepEqual(history.elements,[brush]);
+});
+
+test("pen and text resize handles preserve editable content and remain in the canvas",async()=>{
+  const {resizeAnnotationMark,selectionBounds}=await loadAnnotationModel();
+  const bounds={x:0,y:0,width:640,height:360};
+  for(const mark of ALL_MARKS.filter(mark=>["pen","text"].includes(mark.kind))){
+    for(const handle of ["topLeft","top","topRight","right","bottomRight","bottom","bottomLeft","left"]){
+      const changed=resizeAnnotationMark(mark,handle,{x:600,y:320},bounds),b=selectionBounds(changed);
+      assert.ok(b.x>=-1e-9&&b.y>=-1e-9&&b.x+b.width<=640+1e-9&&b.y+b.height<=360+1e-9,`${mark.kind} ${handle}`);
+      assert.equal(changed.id,mark.id);assert.equal(changed.text,mark.text);
+      assert.ok(Number.isFinite(b.width)&&b.width>0);
+    }
+  }
+});

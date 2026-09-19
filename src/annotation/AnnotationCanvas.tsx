@@ -16,16 +16,21 @@ import type { ColorPreset } from "./model";
 import { clampPoint, hitTestHandle } from "./geom";
 import {
   AnnotationHistory,
+  COLOR_HEX,
+  applyAnnotationAppearance,
   annotationTextForCommit,
+  changeMosaicShape,
   markIndexAt,
   moveEndpointMark,
-  resizeRectangleMark,
+  resizeAnnotationMark,
+  selectionBounds,
   translateMark,
   type AnnotationMark,
   type AnnotationDocumentV1,
   type AppearanceSettings,
   type TextBackgroundStyle,
   type Tool,
+  type MosaicShape,
 } from "./model";
 import { renderAll, textFont, type RenderContext } from "./render";
 import {
@@ -43,6 +48,12 @@ export interface AnnotationCanvasHandle {
   clearAnnotations(): void;
   deleteSelection(): void;
   commitTextEditing(): void;
+  editSelectedText(): void;
+  clearSelection(): void;
+  cancelInteraction(): boolean;
+  updateSelectionAppearance(patch: Partial<AppearanceSettings>, transient?: boolean): void;
+  finishAppearanceAdjustment(): void;
+  setMosaicShape(shape: MosaicShape): void;
   exportResult(): Promise<AnnotationExportResult | null>;
   /**
    * Live text font-size adjustment (spec §6.6): begin records the selected
@@ -76,6 +87,12 @@ interface Props {
   documentRevision?: number;
   selectedMarkId?: number | null;
   onSelectionChange?(markId: number | null): void;
+  onSelectionInfo?(mark: AnnotationMark | null, editing: boolean): void;
+  onMarkCreated?(): void;
+  mosaicShape?: MosaicShape;
+  textEscapeCancelsEdit?: boolean;
+  /** Video's toolbar commits explicitly; selecting a text track must not close its editor. */
+  commitTextOnToolChange?: boolean;
   onDocumentChange?(marks: AnnotationMark[]): void;
   /** Let a video compositor present live drafts through the same effects as export. */
   onFrame?(canvas: HTMLCanvasElement): void;
@@ -106,6 +123,7 @@ interface EditingState {
   text: string;
   rect: Rect;
   maxWidth: number;
+  uiScale: number;
   color: ColorPreset;
   background: TextBackgroundStyle;
   fontSize: number;
@@ -128,6 +146,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       documentRevision,
       selectedMarkId,
       onSelectionChange,
+      onSelectionInfo,
+      onMarkCreated,
+      mosaicShape = "brush",
+      textEscapeCancelsEdit = false,
+      commitTextOnToolChange = true,
       onDocumentChange,
       onFrame,
       onLiveMarks,
@@ -166,6 +189,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     // Publish only user selection changes. External revision reloads use the
     // raw state setter, so their temporary reset cannot clear the parent track.
     const selectMark = useCallback((index: number | null) => {
+      selectedIndexRef.current = index;
       setSelectedIndex(index);
       selectionChangeRef.current?.(index === null ? null : history.elements[index]?.id ?? null);
     }, [history]);
@@ -178,6 +202,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     appearanceRef.current = appearance;
     const toolRef = useRef(tool);
     toolRef.current = tool;
+    const mosaicShapeRef=useRef(mosaicShape);mosaicShapeRef.current=mosaicShape;
+    const markCreatedRef=useRef(onMarkCreated);markCreatedRef.current=onMarkCreated;
     const interactionDisabledRef = useRef(interactionDisabled);
     interactionDisabledRef.current = interactionDisabled;
     const interactionLockRef = useRef(interactionLock);
@@ -259,6 +285,17 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       documentChangeRef.current?.(history.elements.slice());
       publishHistory();
     }, [history, publishHistory]);
+
+    useEffect(()=>{
+      const selected=selectedIndex===null?null:marks[selectedIndex]??null;
+      const mark:AnnotationMark|null=editing?{kind:"text",id:editing.index===null?-1:marks[editing.index]?.id??-1,
+        text:editing.text,rect:editing.rect,color:editing.color,background:editing.background,fontSize:editing.fontSize}:selected;
+      onSelectionInfo?.(mark,!!editing);
+    },[marks,selectedIndex,editing,onSelectionInfo]);
+
+    const appendMark=useCallback((mark:AnnotationMark)=>{
+      history.append(mark);syncMarks();selectMark(history.elements.length-1);markCreatedRef.current?.();
+    },[history,syncMarks,selectMark]);
 
     useEffect(() => {
       publishHistory();
@@ -371,10 +408,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const text = annotationTextForCommit(current.text);
       const frame = current.rect;
       const textRect: Rect = {
-        x: frame.x + 8,
-        y: frame.y + 5,
-        width: Math.max(1, frame.width - 16),
-        height: Math.max(1, frame.height - 10),
+        x: frame.x + 8*current.uiScale,
+        y: frame.y + 5*current.uiScale,
+        width: Math.max(1, frame.width - 16*current.uiScale),
+        height: Math.max(1, frame.height - 10*current.uiScale),
       };
       if (text === null) {
         if (current.index !== null) {
@@ -415,14 +452,54 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
         selectMark(current.index);
       } else {
-        history.append(newMark);
-        syncMarks();
+        appendMark(newMark);
       }
       // Spec §6.6: commit (unchanged edits do not write history). The
       // Return key additionally finishes the capture — handled in the
       // TextEditor's Enter branch so other commit triggers (tool switch,
       // undo, export) do not complete the capture.
-    }, [history, publishHistory, syncMarks]);
+    }, [history, publishHistory, syncMarks, appendMark, selectMark]);
+
+    const editText=useCallback((index:number)=>{
+      const mark=history.elements[index];if(!mark||mark.kind!=="text")return;
+      const uiScale=hitTestScale.radial;
+      const width=Math.max(1,Math.min(mark.rect.width+16*uiScale,documentSize.width));
+      const height=Math.max(1,Math.min(mark.rect.height+10*uiScale,documentSize.height));
+      const next:EditingState={index,text:mark.text,uiScale,rect:{x:Math.min(Math.max(0,mark.rect.x-8*uiScale),Math.max(0,documentSize.width-width)),
+        y:Math.min(Math.max(0,mark.rect.y-5*uiScale),Math.max(0,documentSize.height-height)),width,height},
+        maxWidth:Math.max(width,documentSize.width-Math.max(0,mark.rect.x-8*uiScale)),color:mark.color,background:mark.background,fontSize:mark.fontSize};
+      editingRef.current=next;setEditing(next);selectMark(index);publishHistory();
+    },[history,documentSize.width,documentSize.height,selectMark,publishHistory,hitTestScale.radial]);
+
+    const styleAdjustment=useRef<{index:number;original:AnnotationMark}|null>(null);
+    const finishAppearanceAdjustment=useCallback(()=>{
+      const adjustment=styleAdjustment.current;styleAdjustment.current=null;if(!adjustment)return;
+      if(JSON.stringify(history.elements[adjustment.index])!==JSON.stringify(adjustment.original)){
+        history.commitOverwrite(adjustment.index,adjustment.original);syncMarks();
+      }
+    },[history,syncMarks]);
+    const updateSelectionAppearance=useCallback((patch:Partial<AppearanceSettings>,transient=false)=>{
+      if(interactionsDisabled())return;
+      const editing=editingRef.current;
+      if(editing){
+        const next={...editing,color:patch.colorPreset??editing.color,background:patch.textBackgroundStyle??editing.background,fontSize:patch.textFontSize??editing.fontSize};
+        editingRef.current=next;setEditing(next);return;
+      }
+      const index=selectedIndexRef.current;if(index===null)return;
+      const mark=history.elements[index];if(!mark)return;
+      styleAdjustment.current??={index,original:mark};
+      const next=applyAnnotationAppearance(mark,patch);
+      const elements=history.elements.slice();elements[index]=next;history.overwrite(elements);setMarks(elements);
+      if(!transient)finishAppearanceAdjustment();
+    },[history,interactionsDisabled,finishAppearanceAdjustment]);
+
+    const cancelInteraction=useCallback(()=>{
+      if(editingRef.current){editingRef.current=null;setEditing(null);publishHistory();return true;}
+      if(interactionRef.current.kind!=="none"){
+        interactionRef.current={kind:"none"};setDraft(null);setSelectCursor("default");return true;
+      }
+      return false;
+    },[publishHistory]);
 
     // Switching tools while a text edit is open should commit it (the text
     // becomes a mark and the editor closes), matching the canvas click
@@ -430,15 +507,17 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     // tool.
     const prevTool = useRef(tool);
     useEffect(() => {
-      if (prevTool.current !== tool && editingRef.current) {
+      if (commitTextOnToolChange && prevTool.current !== tool && editingRef.current) {
         commitText();
       }
       prevTool.current = tool;
-    }, [tool, commitText]);
+    }, [tool, commitText, commitTextOnToolChange]);
 
     const onPointerDown = useCallback(
       (e: React.PointerEvent) => {
         if (interactionsDisabled()) return;
+        if(e.button!==0)return;
+        finishAppearanceAdjustment();
         const canvas = canvasRef.current!;
         canvas.setPointerCapture(e.pointerId);
         const p = clampPoint(toPoint(e), {
@@ -455,8 +534,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
 
         if (t === "text") {
-          const width = Math.max(1, Math.min(180, documentSize.width));
-          const height = Math.max(1, Math.min(34, documentSize.height));
+          const hit=markIndexAt(history.elements,p,hitTestScale);
+          if(hit!==null&&history.elements[hit].kind==="text"){editText(hit);return;}
+          const width = Math.max(1, Math.min(180*hitTestScale.radial, documentSize.width));
+          const height = Math.max(1, Math.min(34*hitTestScale.radial, documentSize.height));
           const frame: Rect = {
             x: Math.min(Math.max(0, p.x), Math.max(0, documentSize.width - width)),
             y: Math.min(Math.max(0, p.y), Math.max(0, documentSize.height - height)),
@@ -468,9 +549,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             // only through the Select tool's double-click path below; carrying
             // a stale selection index here would replace the selected mark.
             index: null,
+            uiScale:hitTestScale.radial,
             text: "",
             rect: frame,
-            maxWidth: width,
+            maxWidth: Math.max(width,documentSize.width-frame.x),
             color: ap.colorPreset,
             background: ap.textBackgroundStyle,
             fontSize: ap.textFontSize,
@@ -485,10 +567,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         if (t === "select") {
           const current = history.elements;
           let handleInteraction: string | null = null;
-          if (selectedIndex !== null && current[selectedIndex]?.kind === "rectangle") {
+          if (selectedIndex !== null && current[selectedIndex] && !["line","arrow"].includes(current[selectedIndex].kind)) {
             handleInteraction = hitTestHandle(
               p,
-              (current[selectedIndex] as { rect: Rect }).rect,
+              selectionBounds(current[selectedIndex]),
               9 * hitTestScale.radial,
             );
           } else if (selectedIndex !== null) {
@@ -517,35 +599,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             return;
           }
           const mark = current[index];
-          if (mark.kind === "text" && e.detail >= 2) {
-            const width = Math.max(1, Math.min(mark.rect.width + 16, documentSize.width));
-            const height = Math.max(1, Math.min(mark.rect.height + 10, documentSize.height));
-            const nextEditing: EditingState = {
-              index,
-              text: mark.text,
-              rect: {
-                x: Math.min(
-                  Math.max(0, mark.rect.x - 8),
-                  Math.max(0, documentSize.width - width),
-                ),
-                y: Math.min(
-                  Math.max(0, mark.rect.y - 5),
-                  Math.max(0, documentSize.height - height),
-                ),
-                width,
-                height,
-              },
-              maxWidth: width,
-              color: mark.color,
-              background: mark.background,
-              fontSize: mark.fontSize,
-            };
-            editingRef.current = nextEditing;
-            setEditing(nextEditing);
-            selectMark(index);
-            publishHistory();
-            return;
-          }
+          if (mark.kind === "text" && e.detail >= 2) {editText(index);return;}
           selectMark(index);
           if (handleInteraction === "start" || handleInteraction === "end") {
             interactionRef.current = {
@@ -573,7 +627,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           setDraft({
             kind: "mosaic",
             id: -1,
-            points,
+            points:mosaicShapeRef.current==="brush"?points:[p,p],
+            shape:mosaicShapeRef.current,
             brushDiameter: ap.mosaicBrushDiameter,
             intensity: ap.mosaicIntensity,
             style: ap.mosaicStyle,
@@ -587,7 +642,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             width: ap.shapeWidth,
           });
         } else {
-          setDraft({ kind: "line", id: -1, start: p, end: p, color: ap.colorPreset, width: ap.shapeWidth });
+          setDraft({ kind: t==="arrow"?"arrow":"line", id: -1, start: p, end: p, color: ap.colorPreset, width: ap.shapeWidth });
         }
       },
       [
@@ -599,7 +654,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         commitText,
         history,
         hitTestScale,
-        publishHistory,
+        publishHistory,editText,finishAppearanceAdjustment,
       ],
     );
 
@@ -614,7 +669,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         });
         const interaction = interactionRef.current;
         if (interaction.kind === "none") {
-          if (toolRef.current === "mosaic") setBrushCursor(p);
+          if (toolRef.current === "mosaic" && mosaicShapeRef.current==="brush") setBrushCursor(p);
           else if (brushCursorRef.current) setBrushCursor(null);
           if (toolRef.current === "select") {
             // Spec §6.7: handle → crosshair, over a mark → open hand,
@@ -622,11 +677,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             const current = history.elements;
             const selected = selectedIndexRef.current;
             let cursor = "default";
-            if (selected !== null && current[selected]?.kind === "rectangle") {
+            if (selected !== null && current[selected] && !["line","arrow"].includes(current[selected].kind)) {
               if (
                 hitTestHandle(
                   p,
-                  (current[selected] as { rect: Rect }).rect,
+                  selectionBounds(current[selected]),
                   9 * hitTestScale.radial,
                 )
               ) {
@@ -646,7 +701,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         if (interaction.kind === "draw") {
           const t = interaction.tool;
           // Spec §7.4: the brush cursor tracks the drag point while drawing.
-          if (t === "mosaic") setBrushCursor(p);
+          if (t === "mosaic" && mosaicShapeRef.current==="brush") setBrushCursor(p);
           if (t === "pen" || t === "mosaic") {
             const points = interaction.points;
             const last = points[points.length - 1];
@@ -663,7 +718,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               setDraft({
                 kind: "mosaic",
                 id: -1,
-                points: [...points],
+                points: mosaicShapeRef.current==="brush"?[...points]:[interaction.start,p],
+                shape:mosaicShapeRef.current,
                 brushDiameter: appearanceRef.current.mosaicBrushDiameter,
                 intensity: appearanceRef.current.mosaicIntensity,
                 style: appearanceRef.current.mosaicStyle,
@@ -686,7 +742,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               });
             } else {
               setDraft({
-                kind: "line",
+                kind: t==="arrow"?"arrow":"line",
                 id: -1,
                 start,
                 end: p,
@@ -711,7 +767,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
         if (interaction.kind === "resize") {
           setDraft(
-            resizeRectangleMark(interaction.original, interaction.handle, p, {
+            resizeAnnotationMark(interaction.original, interaction.handle, p, {
               x: 0,
               y: 0,
               width: documentSize.width,
@@ -747,32 +803,33 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             const points = interaction.points;
             const last = points[points.length - 1];
             if (Math.hypot(p.x - last.x, p.y - last.y) >= 0.5) points.push(p);
-            if (points.length > 1) {
-              history.append({
+            if (points.length > 0) {
+              appendMark({
                 kind: "pen",
                 id: Date.now() + Math.random(),
                 points: [...points],
                 color: ap.colorPreset,
                 width: ap.penWidth,
               });
-              syncMarks();
             }
           } else if (t === "mosaic") {
             const points = interaction.points;
             const last = points[points.length - 1];
             if (Math.hypot(p.x - last.x, p.y - last.y) >= 0.5) points.push(p);
-            history.append({
+            if(mosaicShapeRef.current!=="brush"&&(Math.abs(p.x-interaction.start.x)<1||Math.abs(p.y-interaction.start.y)<1)){setDraft(null);return;}
+            appendMark({
               kind: "mosaic",
               id: Date.now() + Math.random(),
-              points: [...points],
+              points: mosaicShapeRef.current==="brush"?[...points]:[interaction.start,p],
+              shape:mosaicShapeRef.current,
               brushDiameter: ap.mosaicBrushDiameter,
               intensity: ap.mosaicIntensity,
               style: ap.mosaicStyle,
             });
-            syncMarks();
           } else if (t === "rectangle") {
             const start = interaction.start;
-            history.append({
+            if(Math.abs(p.x-start.x)<1||Math.abs(p.y-start.y)<1){setDraft(null);return;}
+            appendMark({
               kind: "rectangle",
               id: Date.now() + Math.random(),
               rect: {
@@ -784,11 +841,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               color: ap.colorPreset,
               width: ap.shapeWidth,
             });
-            syncMarks();
           } else {
             const start = interaction.start;
             if (Math.hypot(p.x - start.x, p.y - start.y) >= 3) {
-              history.append({
+              appendMark({
                 kind: t === "arrow" ? "arrow" : "line",
                 id: Date.now() + Math.random(),
                 start,
@@ -796,7 +852,6 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
                 color: ap.colorPreset,
                 width: ap.shapeWidth,
               });
-              syncMarks();
             }
           }
           setDraft(null);
@@ -808,7 +863,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           interaction.kind === "resize" ||
           interaction.kind === "endpoint"
         ) {
-          const preview = draft;
+          const bounds={x:0,y:0,width:documentSize.width,height:documentSize.height};
+          const preview=interaction.kind==="move"?translateMark(interaction.original,{x:p.x-interaction.start.x,y:p.y-interaction.start.y},bounds):
+            interaction.kind==="resize"?resizeAnnotationMark(interaction.original,interaction.handle,p,bounds):moveEndpointMark(interaction.original,interaction.isStart,p);
           // Spec §6.3: only commit a drag when it actually changed the
           // mark (≥1pt of movement) — a click without movement must not
           // write a no-op history entry.
@@ -829,10 +886,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         toPoint,
         documentSize.height,
         documentSize.width,
-        draft,
         redraw,
         syncMarks,
-        history,
+        history,appendMark,
       ],
     );
 
@@ -881,7 +937,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     };
     deleteRef.current = () => {
       if (interactionsDisabled()) return;
-      if (toolRef.current !== "select" || selectedIndexRef.current === null) return;
+      if (selectedIndexRef.current === null) return;
       history.remove(selectedIndexRef.current);
       selectMark(null);
       syncMarks();
@@ -1068,12 +1124,23 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         commitTextEditing: () => {
           if (!interactionsDisabled()) commitText();
         },
+        editSelectedText:()=>{if(!interactionsDisabled()&&selectedIndexRef.current!==null)editText(selectedIndexRef.current);},
+        clearSelection:()=>{if(!interactionsDisabled()){finishAppearanceAdjustment();selectMark(null);}},
+        cancelInteraction,
+        updateSelectionAppearance,
+        finishAppearanceAdjustment,
+        setMosaicShape:(shape)=>{
+          if(interactionsDisabled())return;finishAppearanceAdjustment();
+          const index=selectedIndexRef.current;if(index===null)return;
+          const mark=history.elements[index];if(!mark||mark.kind!=="mosaic")return;
+          const next=changeMosaicShape(mark,shape);if(next!==mark){history.replace(index,next);syncMarks();}
+        },
         exportResult: () => exportResult(),
         beginTextFontSizeAdjustment: () => beginFontAdjustRef.current(),
         setTextFontSizeLive: (value: number) => setFontLiveRef.current(value),
         endTextFontSizeAdjustment: () => endFontAdjustRef.current(),
       }),
-      [commitText, exportResult, history, interactionsDisabled, syncMarks],
+      [commitText, exportResult, history, interactionsDisabled, syncMarks,editText,selectMark,cancelInteraction,updateSelectionAppearance,finishAppearanceAdjustment],
     );
 
     return (
@@ -1110,6 +1177,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={()=>{interactionRef.current={kind:"none"};setDraft(null);setSelectCursor("default");}}
+          onPointerLeave={()=>setBrushCursor(null)}
         />
         {editing && (
           <div
@@ -1134,7 +1203,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               onFinish={onFinishAfterTextCommit}
               onUndo={() => undoRef.current()}
               onRedo={() => redoRef.current()}
-              onCancel={onCancel}
+              onCancel={textEscapeCancelsEdit?()=>{cancelInteraction();}:onCancel}
+              nativeUndo={textEscapeCancelsEdit}
             />
           </div>
         )}
@@ -1154,6 +1224,7 @@ function TextEditor(props: {
   onUndo(): void;
   onRedo(): void;
   onCancel(): void;
+  nativeUndo?: boolean;
 }) {
   const {
     editing,
@@ -1166,6 +1237,7 @@ function TextEditor(props: {
     onUndo,
     onRedo,
     onCancel,
+    nativeUndo,
   } = props;
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -1189,6 +1261,7 @@ function TextEditor(props: {
         x: editing.rect.x,
         y: editing.rect.y,
         maxWidth: editing.maxWidth,
+        uiScale: editing.uiScale,
         boundsWidth: bounds.width,
         boundsHeight: bounds.height,
         measureText: (value) => ctx.measureText(value).width,
@@ -1215,6 +1288,7 @@ function TextEditor(props: {
   return (
     <textarea
       ref={ref}
+      aria-label={t("Text content")}
       disabled={disabled}
       value={editing.text}
       placeholder={t("Type something…")}
@@ -1227,6 +1301,7 @@ function TextEditor(props: {
           e.preventDefault();
           onCancel();
         } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+          if(nativeUndo){e.stopPropagation();return;}
           // Spec §10.1: undo/redo commit the text edit first, then act on
           // the canvas history (never the textarea's native undo).
           e.preventDefault();
@@ -1248,11 +1323,11 @@ function TextEditor(props: {
         width: editing.rect.width,
         height: editing.rect.height,
         boxSizing: "border-box",
-        padding: "5px 8px",
+        padding: `${5*editing.uiScale}px ${8*editing.uiScale}px`,
         font: textFont(editing.fontSize),
-        color: editing.color,
+        color: COLOR_HEX[editing.color],
         background: editing.background === "dark" ? "rgba(0,0,0,0.72)" : "transparent",
-        border: `1px solid ${editing.color}cc`,
+        border: `${editing.uiScale}px solid ${COLOR_HEX[editing.color]}cc`,
         borderRadius: 7,
         resize: "none",
         overflow: "hidden",

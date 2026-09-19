@@ -67,6 +67,7 @@ export function fitTextEditorFrame(options) {
     boundsWidth,
     boundsHeight,
     measureText,
+    uiScale = 1,
   } = options;
   const safeBoundsWidth = Math.max(1, boundsWidth);
   const safeBoundsHeight = Math.max(1, boundsHeight);
@@ -75,13 +76,13 @@ export function fitTextEditorFrame(options) {
     .split(/\r?\n/)
     .reduce((longest, line) => Math.max(longest, measureText(line)), 0);
   const width = Math.min(
-    Math.max(Math.min(120, widthLimit), Math.ceil(longestExplicitLine) + 16 + 2),
+    Math.max(Math.min(120 * uiScale, widthLimit), Math.ceil(longestExplicitLine) + 18 * uiScale),
     widthLimit,
   );
-  const visualLineCount = layoutTextLines(text, Math.max(1, width - 16), measureText).length;
+  const visualLineCount = layoutTextLines(text, Math.max(1, width - 16 * uiScale), measureText).length;
   const lineHeight = fontSize * 1.25;
   const height = Math.min(
-    Math.max(Math.min(34, safeBoundsHeight), Math.ceil(visualLineCount * lineHeight) + 10 + 2),
+    Math.max(Math.min(34 * uiScale, safeBoundsHeight), Math.ceil(visualLineCount * lineHeight) + 12 * uiScale),
     safeBoundsHeight,
   );
   return {

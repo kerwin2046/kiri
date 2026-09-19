@@ -22,4 +22,5 @@ export function fitTextEditorFrame(options: {
   boundsWidth: number;
   boundsHeight: number;
   measureText: MeasureText;
+  uiScale?: number;
 }): TextFrame;

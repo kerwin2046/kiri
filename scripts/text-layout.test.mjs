@@ -48,3 +48,11 @@ test("text editor frame covers wrapped lines and remains inside narrow bounds", 
   });
   assert.deepEqual(narrow, { x: 0, y: 0, width: 20, height: 20 });
 });
+
+test("inline text padding stays usable when a low-resolution video is enlarged",()=>{
+ const options={text:"Kiri",fontSize:18,x:0,y:0,maxWidth:300,boundsWidth:640,boundsHeight:360,measureText:value=>value.length*9};
+ const normal=fitTextEditorFrame(options);
+ const scaled=fitTextEditorFrame({...options,fontSize:9,maxWidth:150,boundsWidth:320,boundsHeight:180,measureText:value=>value.length*4.5,uiScale:.5});
+ assert.ok(Math.abs(scaled.width*2-normal.width)<=1);
+ assert.ok(Math.abs(scaled.height*2-normal.height)<=1);
+});

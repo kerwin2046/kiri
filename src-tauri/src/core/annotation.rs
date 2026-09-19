@@ -91,6 +91,14 @@ pub enum MosaicStyle {
     Blur,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MosaicShape {
+    Brush,
+    Rectangle,
+    Ellipse,
+}
+
 /// Last-used annotation styling shared by the capture overlay and editor.
 /// The active tool is deliberately excluded so every new surface still opens
 /// in its predictable selection state.
@@ -180,6 +188,8 @@ pub enum AnnotationMark {
         brush_diameter: f64,
         intensity: MosaicIntensity,
         style: MosaicStyle,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<MosaicShape>,
     },
 }
 
@@ -282,10 +292,16 @@ impl AnnotationDocument {
                     id,
                     points,
                     brush_diameter,
+                    shape,
                     ..
                 } => {
                     validate_visual_size(*brush_diameter)?;
                     validate_points(points, 1, coordinate_limit)?;
+                    if matches!(shape, Some(MosaicShape::Rectangle | MosaicShape::Ellipse))
+                        && points.len() != 2
+                    {
+                        return Err("A mosaic shape needs two corners.".into());
+                    }
                     (*id, points.len(), 0)
                 }
             };
@@ -451,6 +467,18 @@ mod tests {
             r#"{"kind":"line","id":0,"start":{"x":1,"y":2},"end":{"x":3,"y":4},"color":"blue","width":3},{"kind":"arrow","id":-0,"start":{"x":1,"y":2},"end":{"x":3,"y":4},"color":"white","width":3}"#,
         );
         assert!(AnnotationDocument::from_json(&signed_zero_duplicate).is_err());
+    }
+
+    #[test]
+    fn mosaic_shapes_validate_corners_and_keep_legacy_brushes_compatible() {
+        for shape in ["rectangle", "ellipse", "brush"] {
+            let mark = format!(r#"{{"kind":"mosaic","id":1,"points":[{{"x":10,"y":20}},{{"x":70,"y":50}}],"brushDiameter":20,"intensity":"standard","style":"blur","shape":"{shape}"}}"#);
+            let parsed = AnnotationDocument::from_json(&document_json(&mark)).unwrap();
+            let encoded = String::from_utf8(parsed.to_json().unwrap()).unwrap();
+            assert_eq!(AnnotationDocument::from_json(&encoded).unwrap(), parsed);
+        }
+        let invalid = r#"{"kind":"mosaic","id":1,"points":[{"x":10,"y":20}],"brushDiameter":20,"intensity":"standard","style":"blur","shape":"ellipse"}"#;
+        assert!(AnnotationDocument::from_json(&document_json(invalid)).is_err());
     }
 
     #[test]

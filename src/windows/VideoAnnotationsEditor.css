@@ -29,3 +29,13 @@
 .kiri-video-inspector .kiri-video-annotation-appearance .kiri-effect-slider {display:grid;grid-template-columns:1fr;}
 .kiri-video-annotation-inspector input[type=range] {padding:0;border:0;background:transparent;}
 .kiri-video-inspector .kiri-video-annotation-swatch {width:18px;height:18px;}
+
+.kiri-video-tool-heading {display:flex;align-items:baseline;justify-content:space-between;gap:8px;width:100%;}
+.kiri-video-tool-heading>span {font-size:10px;color:var(--kiri-secondary-label);}
+.kiri-video-tool-hint {margin:0 0 6px!important;width:100%;line-height:1.6;color:var(--kiri-secondary-label);}
+.kiri-video-edit-text {width:100%;margin-bottom:6px;}
+.kiri-video-annotation-colors {display:flex;flex-wrap:wrap;gap:8px;padding:4px 1px;width:100%;}
+.kiri-video-property {display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;}
+.kiri-video-property>span {font-size:11px;color:var(--kiri-secondary-label);}
+.kiri-video-property>.kiri-choice-trigger {min-width:95px;justify-content:space-between;}
+.kiri-video-annotation-inspector>.kiri-button {width:100%;margin-top:12px;}

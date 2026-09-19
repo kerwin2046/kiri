@@ -65,7 +65,7 @@ function markBounds(mark) {
     case "pen":
       return pointsBounds(mark.points, mark.width / 2);
     case "mosaic":
-      return pointsBounds(mark.points, mark.brushDiameter / 2);
+      return pointsBounds(mark.points, mark.shape && mark.shape !== "brush" ? 0 : mark.brushDiameter / 2);
     case "rectangle":
       return paddedRect(mark.rect, mark.width / 2);
     case "line":

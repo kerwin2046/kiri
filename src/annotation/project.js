@@ -192,9 +192,11 @@ function parseMark(value, index, ids, totals) {
     case "mosaic":
       exactKeys(
         mark,
-        ["kind", "id", "points", "brushDiameter", "intensity", "style"],
+        ["kind", "id", "points", "brushDiameter", "intensity", "style", ...(Object.hasOwn(mark,"shape")?["shape"]:[])],
         path,
       );
+      if(Object.hasOwn(mark,"shape"))enumValue(mark.shape,new Set(["brush","rectangle","ellipse"]),`${path}.shape`);
+      if(mark.shape && mark.shape!=="brush" && (!Array.isArray(mark.points)||mark.points.length!==2))invalid(`${path}.points`,"must contain two corners for a mosaic shape");
       return {
         kind: "mosaic",
         id: parseId(mark.id, `${path}.id`, ids),
@@ -202,6 +204,7 @@ function parseMark(value, index, ids, totals) {
         brushDiameter: parseWidth(mark.brushDiameter, `${path}.brushDiameter`),
         intensity: enumValue(mark.intensity, MOSAIC_INTENSITIES, `${path}.intensity`),
         style: enumValue(mark.style, MOSAIC_STYLES, `${path}.style`),
+        ...(Object.hasOwn(mark,"shape")?{shape:enumValue(mark.shape,new Set(["brush","rectangle","ellipse"]),`${path}.shape`)}:{}),
       };
     default:
       invalid(`${path}.kind`, "has an unknown value");
