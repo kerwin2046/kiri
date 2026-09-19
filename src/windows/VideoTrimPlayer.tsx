@@ -385,7 +385,13 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     const added=marks.filter(mark=>!existing.has(mark.id)).map((mark,index)=>({id:`annotation-${mark.id}`,mark,start,end,layer:nextVideoLayer([...current.effects,...current.annotations,...current.stickers])+index}));
     if(retained.length+added.length>128){setAnnotationRevision(value=>value+1);setError(true);return;}
     apply({...current,annotations:[...retained,...added]});
-    if(added.length)setAnnotationId(added[added.length-1].id);
+    if(added.length){
+      setAnnotationId(added[added.length-1].id);
+      const player=video.current;
+      if(player&&(player.currentTime<start||player.currentTime>=end)){
+        const next=videoLayerPreviewTime(start,end);player.currentTime=next;setTime(next);
+      }
+    }
   }
   function selectTrack(id:string){
 
@@ -415,7 +421,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
 
 
         {editing ? <button type="button" className="kiri-button kiri-button--secondary" disabled={busy} onClick={()=>{commitAnnotation.current?.();previewing.current=false;video.current?.pause();setEditing(false);setAnnotating(false);}}>{t("Close editor")}</button>
-          : props.editable && <button type="button" className="kiri-button kiri-button--primary" disabled={duration<=0} onClick={()=>{video.current?.pause();setEditing(true);}}><Scissors size={14}/>{t("Trim & Export")}</button>}
+          : props.editable && <button type="button" className="kiri-button kiri-button--primary" disabled={duration<=0} onClick={()=>{video.current?.pause();if((video.current?.currentTime??0)>=duration-.001)seek(0);setEditing(true);}}><Scissors size={14}/>{t("Trim & Export")}</button>}
         <button type="button" className="kiri-icon-button" aria-label={t("Close · Esc")} title={t("Close · Esc")} onClick={props.onClose}><X size={16}/></button>
       </div>
     </header>

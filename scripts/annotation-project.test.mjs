@@ -405,3 +405,28 @@ test('privacy blur softens actual pixels and keeps transparent edges free of hid
  const uniform=new Uint8ClampedArray([20,80,140,255]);blurRgba(uniform,1,1,20);
  assert.deepEqual([...uniform],[20,80,140,255]);
 });
+
+test('sparse mosaic samples cover the connecting stroke without overlap holes',async()=>{
+ const {clipToMosaicStroke}=await loadAnnotationRender();
+ function coverage(points){
+  const shapes=[];let polygon=[];
+  const ctx={save(){},beginPath(){},clip(){},moveTo(x,y){polygon=[{x,y}]},lineTo(x,y){polygon.push({x,y})},closePath(){shapes.push({polygon});polygon=[]},arc(x,y,r){shapes.push({x,y,r})}};
+  clipToMosaicStroke(ctx,points,20);
+  return (x,y)=>shapes.reduce((winding,shape)=>{
+   if('r' in shape)return winding+(Math.hypot(x-shape.x,y-shape.y)<shape.r?1:0);
+   const p=shape.polygon;let inside=false,area=0;
+   for(let i=0,j=p.length-1;i<p.length;j=i++){
+    const a=p[j],b=p[i];area+=a.x*b.y-b.x*a.y;
+    if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+   }
+   return winding+(inside?Math.sign(area):0);
+  },0)!==0;
+ }
+ const horizontal=coverage([{x:10,y:10},{x:110,y:10}]);
+ assert.ok(horizontal(60,10),'fast movement must fill the gap between samples');
+ assert.ok(horizontal(15,10),'the segment must not cancel the overlapping round cap');
+ assert.equal(horizontal(60,21),false);
+ const diagonal=coverage([{x:10,y:10},{x:100,y:100},{x:30,y:100}]);
+ assert.ok(diagonal(55,55));assert.ok(diagonal(65,100));assert.equal(diagonal(60,30),false);
+ assert.ok(coverage([{x:50,y:50},{x:50,y:50}])(50,50));
+});

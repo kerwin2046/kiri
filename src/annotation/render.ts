@@ -281,19 +281,18 @@ function mosaicStrokeBounds(points: Point[], diameter: number, region: Rect): Re
 export function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number) {
   ctx.save();
   ctx.beginPath();
-  // Canvas 2D clip() uses the path's *fill* region, so an open polyline
-  // would clip to ~nothing. Build the stroke band as the union of one disk
-  // per sample point: sampling distance (≥0.5pt) is far smaller than the
-  // brush diameter (≥12pt), so the disks overlap into a continuous band,
-  // equivalent to clipping against the brush's stroked outline.
+  // A filled capsule joins each pair of samples even when fast motion skips pixels.
+  // Disks and connecting quads share their winding, so overlaps cannot cancel out.
   const radius = diameter / 2;
-  if (points.length === 1) {
-    ctx.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);
-  } else {
-    for (const p of points) {
-      ctx.moveTo(p.x + radius, p.y);
-      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    }
+  for (let index=0;index<points.length;index++) {
+    const p=points[index];
+    ctx.moveTo(p.x+radius,p.y);ctx.arc(p.x,p.y,radius,0,Math.PI*2);
+    if(!index)continue;
+    const previous=points[index-1],dx=p.x-previous.x,dy=p.y-previous.y,length=Math.hypot(dx,dy);
+    if(!length)continue;
+    const nx=-dy/length*radius,ny=dx/length*radius;
+    ctx.moveTo(previous.x-nx,previous.y-ny);ctx.lineTo(p.x-nx,p.y-ny);
+    ctx.lineTo(p.x+nx,p.y+ny);ctx.lineTo(previous.x+nx,previous.y+ny);ctx.closePath();
   }
   ctx.clip();
 }
