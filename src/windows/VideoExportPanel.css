@@ -1,0 +1,9 @@
+.kiri-video-export {position:static;}
+.kiri-video-export-panel {position:absolute;right:12px;top:calc(100% + 5px);width:300px;max-width:calc(100vw - 40px);box-sizing:border-box;z-index:40;padding:16px;background:var(--kiri-elevated);color:var(--kiri-label);border:1px solid var(--kiri-surface-border);border-radius:10px;box-shadow:0 6px 20px #0003;display:grid;gap:16px;outline:none;}
+.kiri-video-export-panel-title {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.kiri-video-export-panel .kiri-video-export-settings {min-width:0;max-width:none;width:100%;}
+.kiri-video-export-panel p {margin:0;font-size:11px;color:var(--kiri-secondary-label);line-height:1.5;}
+.kiri-video-export-panel-actions {display:flex;justify-content:flex-end;gap:8px;}
+.kiri-video-export-panel .kiri-video-export-settings-title,.kiri-video-export-panel .kiri-video-export-settings-detail {display:flex;}
+.kiri-video-editor-heading .kiri-video-export-panel span {display:initial;}
+.kiri-video-export-panel .kiri-video-export-status:empty {display:none;}

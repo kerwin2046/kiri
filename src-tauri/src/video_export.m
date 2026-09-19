@@ -124,6 +124,10 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                 [annotationImages addObject:image];
             }
             if (effectCount > 0 || annotationCount > 0) {
+                // Canvas and the Windows compositor blend in sRGB, not linear light.
+                CGColorSpaceRef workingSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                CIContext *effectContext = [CIContext contextWithOptions:@{kCIContextWorkingColorSpace: (__bridge id)workingSpace}];
+                CGColorSpaceRelease(workingSpace);
                 AVVideoComposition *filtered = [AVVideoComposition videoCompositionWithAsset:edited applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request) {
                     double outputTime = CMTimeGetSeconds(request.compositionTime);
                     double sourceTime = segments[count - 1].end;
@@ -181,6 +185,16 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     }
                     for (size_t index = 0; index < effectCount; index++) {
                         KiriVideoEffect effect = effects[index];
+                        if (effect.kind != 2 || sourceTime < effect.start || sourceTime >= effect.end) continue;
+                        CGRect focus = CGRectIntegral(CGRectMake(extent.origin.x + effect.x * extent.size.width,
+                            extent.origin.y + (1 - effect.y - effect.height) * extent.size.height,
+                            effect.width * extent.size.width, effect.height * extent.size.height));
+                        CIImage *original = [image imageByCroppingToRect:focus];
+                        CIImage *shade = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:effect.strength]] imageByCroppingToRect:extent];
+                        image = [original imageByCompositingOverImage:[shade imageByCompositingOverImage:image]];
+                    }
+                    for (size_t index = 0; index < effectCount; index++) {
+                        KiriVideoEffect effect = effects[index];
                         if (effect.kind != 0 || sourceTime < effect.start || sourceTime >= effect.end) continue;
                         double ease = 1;
                         double ramp = MIN(effect.transition, (effect.end - effect.start) / 2);
@@ -200,11 +214,39 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                         image = [image imageByApplyingTransform:CGAffineTransformMakeScale(extent.size.width / crop.size.width, extent.size.height / crop.size.height)];
                         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(extent.origin.x, extent.origin.y)];
                     }
+                    for (size_t index = 0; index < effectCount; index++) {
+                        KiriVideoEffect effect = effects[index];
+                        if (sourceTime < effect.start || sourceTime >= effect.end) continue;
+                        if (effect.kind == 3) {
+                            double padding = effect.strength * 0.25;
+                            double scale = MIN((1 - 2 * padding) / effect.width, (1 - 2 * padding) / effect.height);
+                            CGRect crop = CGRectMake(extent.origin.x + effect.x * extent.size.width,
+                                extent.origin.y + (1 - effect.y - effect.height) * extent.size.height,
+                                effect.width * extent.size.width, effect.height * extent.size.height);
+                            CIImage *content = [[image imageByCroppingToRect:crop] imageByApplyingTransform:CGAffineTransformMakeTranslation(-crop.origin.x, -crop.origin.y)];
+                            content = [content imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale)];
+                            content = [content imageByApplyingTransform:CGAffineTransformMakeTranslation(extent.origin.x + (extent.size.width - crop.size.width * scale) / 2,
+                                extent.origin.y + (extent.size.height - crop.size.height * scale) / 2)];
+                            CIColor *color = [CIColor colorWithRed:((effect.color >> 16) & 255) / 255.0
+                                green:((effect.color >> 8) & 255) / 255.0 blue:(effect.color & 255) / 255.0 alpha:1];
+                            image = [content imageByCompositingOverImage:[[CIImage imageWithColor:color] imageByCroppingToRect:extent]];
+                        }
+                    }
+                    for (size_t index = 0; index < effectCount; index++) {
+                        KiriVideoEffect effect = effects[index];
+                        if (effect.kind != 4 || sourceTime < effect.start || sourceTime >= effect.end) continue;
+                        double ramp = MIN(effect.transition, (effect.end - effect.start) / 2);
+                        double progress = ramp > 0 ? MIN(MIN(1, MAX(0, (sourceTime - effect.start) / ramp)), MIN(1, MAX(0, (effect.end - sourceTime) / ramp))) : 1;
+                        double alpha = 1 - progress * progress * (3 - 2 * progress);
+                        CIColor *color = [CIColor colorWithRed:((effect.color >> 16) & 255) / 255.0
+                            green:((effect.color >> 8) & 255) / 255.0 blue:(effect.color & 255) / 255.0 alpha:alpha];
+                        image = [[[CIImage imageWithColor:color] imageByCroppingToRect:extent] imageByCompositingOverImage:image];
+                    }
                     image = [image imageByCroppingToRect:extent];
                     if (target.width != extent.size.width || target.height != extent.size.height) {
                         image = [image imageByApplyingTransform:CGAffineTransformMakeScale(target.width / extent.size.width, target.height / extent.size.height)];
                     }
-                    [request finishWithImage:image context:nil];
+                    [request finishWithImage:image context:effectContext];
                 }];
                 AVMutableVideoComposition *composition = [filtered mutableCopy];
                 composition.frameDuration = frameDuration;

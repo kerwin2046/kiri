@@ -68,6 +68,7 @@ export function ViewerWindow(props: { id: string }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (
         event.key === "Escape" ||
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "w")

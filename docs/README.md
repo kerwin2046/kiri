@@ -95,3 +95,5 @@ development.
 - [0035 — Video timeline and timed effects](adr/0035-video-timeline-and-timed-effects.md)
 
 - [0036 — Video annotation tracks and playback controls](adr/0036-video-annotation-tracks-and-playback.md)
+
+- [0041 — Single-canvas video editing](adr/0041-single-canvas-video-editing.md)

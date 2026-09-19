@@ -98,7 +98,7 @@ pub(super) fn render(
                     while timestamp < interval[1] {
                         // Long VFR frames need intermediate camera positions during
                         // ramps. Stream these samples instead of allocating a timeline.
-                        let next = if zoom_is_animating(effects, timestamp) {
+                        let next = if effect_is_animating(effects, timestamp) {
                             let cadence = (10_000_000_i64 * i64::from(denominator)
                                 / i64::from(numerator))
                             .max(83_333);
@@ -245,10 +245,12 @@ fn paint(frame: &mut RgbaImage, time: i64, annotations: &[PreparedVideoAnnotatio
     Ok(())
 }
 
-fn zoom_is_animating(effects: &[VideoEffect], timestamp: i64) -> bool {
+fn effect_is_animating(effects: &[VideoEffect], timestamp: i64) -> bool {
     let time = timestamp as f64 / 10_000_000.0;
     effects.iter().any(|effect| {
-        if effect.kind != VideoEffectKind::Zoom || effect.transition <= 0.0 {
+        if !matches!(effect.kind, VideoEffectKind::Zoom | VideoEffectKind::Fade)
+            || effect.transition <= 0.0
+        {
             return false;
         }
         let ramp = effect.transition.min((effect.end - effect.start) / 2.0);
@@ -333,6 +335,21 @@ fn paint_effects(frame: &mut RgbaImage, timestamp: i64, effects: &[VideoEffect])
         };
         imageops::replace(frame, &filtered, i64::from(left), i64::from(top));
     }
+    for effect in effects.iter().filter(|effect| {
+        effect.kind == VideoEffectKind::Spotlight && time >= effect.start && time < effect.end
+    }) {
+        let left = (effect.x * frame.width() as f64).floor() as u32;
+        let top = (effect.y * frame.height() as f64).floor() as u32;
+        let right = ((effect.x + effect.width) * frame.width() as f64).ceil() as u32;
+        let bottom = ((effect.y + effect.height) * frame.height() as f64).ceil() as u32;
+        for (x, y, pixel) in frame.enumerate_pixels_mut() {
+            if x < left || x >= right || y < top || y >= bottom {
+                for channel in &mut pixel.0[..3] {
+                    *channel = (f64::from(*channel) * (1.0 - effect.strength)).round() as u8;
+                }
+            }
+        }
+    }
     if let Some(effect) = effects.iter().find(|effect| {
         effect.kind == VideoEffectKind::Zoom
             && timestamp >= super::ticks(effect.start)
@@ -352,12 +369,135 @@ fn paint_effects(frame: &mut RgbaImage, timestamp: i64, effects: &[VideoEffect])
             *frame = zoomed;
         }
     }
+    for effect in effects.iter().filter(|effect| {
+        effect.kind == VideoEffectKind::Frame && time >= effect.start && time < effect.end
+    }) {
+        let padding = effect.strength * 0.25;
+        let scale =
+            ((1.0 - 2.0 * padding) / effect.width).min((1.0 - 2.0 * padding) / effect.height);
+        let width = effect.width * scale;
+        let height = effect.height * scale;
+        let left = (1.0 - width) / 2.0;
+        let top = (1.0 - height) / 2.0;
+        let background = image::Rgba([
+            (effect.color >> 16) as u8,
+            (effect.color >> 8) as u8,
+            effect.color as u8,
+            255,
+        ]);
+        *frame = RgbaImage::from_fn(frame.width(), frame.height(), |x, y| {
+            let u = ((x as f64 + 0.5) / frame.width() as f64 - left) / width;
+            let v = ((y as f64 + 0.5) / frame.height() as f64 - top) / height;
+            if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+                return background;
+            }
+            imageops::sample_bilinear(
+                frame,
+                (effect.x + u * effect.width) as f32,
+                (effect.y + v * effect.height) as f32,
+            )
+            .unwrap_or(background)
+        });
+    }
+    for effect in effects.iter().filter(|effect| {
+        effect.kind == VideoEffectKind::Fade && time >= effect.start && time < effect.end
+    }) {
+        let ramp = effect.transition.min((effect.end - effect.start) / 2.0);
+        let progress = if ramp > 0.0 {
+            ((time - effect.start) / ramp)
+                .clamp(0.0, 1.0)
+                .min(((effect.end - time) / ramp).clamp(0.0, 1.0))
+        } else {
+            1.0
+        };
+        let ease = progress * progress * (3.0 - 2.0 * progress);
+        let color = [
+            (effect.color >> 16) as u8,
+            (effect.color >> 8) as u8,
+            effect.color as u8,
+        ];
+        for pixel in frame.pixels_mut() {
+            for (channel, background) in pixel.0[..3].iter_mut().zip(color) {
+                *channel = (f64::from(*channel) * ease + f64::from(background) * (1.0 - ease))
+                    .round() as u8;
+            }
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_effect_pixels_respect_bounds_background_and_fade() {
+        let original = RgbaImage::from_fn(100, 80, |x, _| {
+            if x < 50 {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([0, 0, 255, 255])
+            }
+        });
+        let base = VideoEffect {
+            start: 0.0,
+            end: 3.0,
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 1.0,
+            strength: 0.8,
+            color: 0xffffff,
+            transition: 0.5,
+            ..Default::default()
+        };
+        let mut frame = original.clone();
+        paint_effects(
+            &mut frame,
+            10_000_000,
+            &[VideoEffect {
+                kind: VideoEffectKind::Spotlight,
+                ..base
+            }],
+        )
+        .unwrap();
+        assert_eq!(frame.get_pixel(10, 40).0, [255, 0, 0, 255]);
+        assert_eq!(frame.get_pixel(90, 40).0, [0, 0, 51, 255]);
+        let mut frame = original.clone();
+        paint_effects(
+            &mut frame,
+            10_000_000,
+            &[VideoEffect {
+                kind: VideoEffectKind::Frame,
+                ..base
+            }],
+        )
+        .unwrap();
+        assert_eq!(frame.get_pixel(50, 40).0, [255, 0, 0, 255]);
+        assert_eq!(frame.get_pixel(10, 40).0, [255, 255, 255, 255]);
+        let mut frame = original.clone();
+        paint_effects(
+            &mut frame,
+            2_500_000,
+            &[VideoEffect {
+                kind: VideoEffectKind::Fade,
+                ..base
+            }],
+        )
+        .unwrap();
+        assert_eq!(frame.get_pixel(10, 40).0, [255, 128, 128, 255]);
+        let mut frame = original.clone();
+        paint_effects(
+            &mut frame,
+            30_000_000,
+            &[VideoEffect {
+                kind: VideoEffectKind::Frame,
+                ..base
+            }],
+        )
+        .unwrap();
+        assert_eq!(frame, original);
+    }
 
     #[test]
     fn zoom_enters_holds_and_returns_to_full_frame_symmetrically() {

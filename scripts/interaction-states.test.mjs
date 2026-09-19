@@ -27,6 +27,20 @@ test("playback scrubbing updates without native range events and ends only once"
   component.unmount();
 });
 
+test("effect slider drags form one undo transaction, including pointer capture loss",()=>{
+  const source=readFileSync(new URL("../src/windows/VideoEffectSlider.tsx",import.meta.url),"utf8");
+  const harness=createLibraryHarness({},source.replace('import {useRef}', 'import React,{useRef}'));
+  const changes=[];
+  const component=harness.mount("VideoEffectSlider",{label:"Strength",value:.5,min:0,max:1,step:.01,text:"50%",onChange:(value,transient)=>changes.push([value,transient])});
+  const input=nodes(component.render()).find(node=>node?.type==="input");
+  const target={getBoundingClientRect:()=>({left:100,width:212}),focus(){},setPointerCapture(){}};
+  const event=x=>({button:0,pointerId:1,clientX:x,currentTarget:target,preventDefault(){}});
+  input.props.onPointerDown(event(156));input.props.onPointerMove(event(256));input.props.onPointerUp();input.props.onLostPointerCapture();
+  assert.deepEqual(changes,[[.25,true],[.75,true],[.75,false]]);
+  input.props.onChange({target:{value:"0.5"}});assert.deepEqual(changes.at(-1),[.5,false]);
+  component.unmount();
+});
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(repositoryRoot, "src");
 

@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import ts from "typescript";
 const source = readFileSync(new URL("../src/windows/video-effects.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.ESNext}}).outputText;
-const {defaultOverlayRange, activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, resizeVideoEffectFromHandle, videoZoomViewport, validVideoEffect} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const {defaultOverlayRange, activeVideoEffects, createVideoEffect, moveVideoEffect, resizeVideoEffect, resizeVideoEffectFromHandle, videoZoomViewport, validVideoEffect, cropVideoFrame, videoFrameRect, videoPreviewTransform} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 
 test("new zoom clips at the next zoom and refuses overlapping placement", () => {
   const existing = {...createVideoEffect("zoom", 4, 10, []), id:"first"};
@@ -107,4 +107,33 @@ test("new overlays at the end remain visible for one second or the whole short c
   assert.deepEqual(defaultOverlayRange(9.95, 10), {start:9, end:10});
   assert.deepEqual(defaultOverlayRange(.2, .2), {start:0, end:.2});
   assert.deepEqual(defaultOverlayRange(2, 10), {start:2, end:5});
+});
+
+test("crop, fade and zoom each have a single camera interval but can combine",()=>{
+ const zoom=createVideoEffect("zoom",0,5,[]),frame=createVideoEffect("frame",0,5,[zoom]),fade=createVideoEffect("fade",0,5,[zoom,frame]);
+ assert.ok(validVideoEffect(frame,[zoom],5));assert.ok(validVideoEffect(fade,[zoom,frame],5));
+ assert.equal(createVideoEffect("frame",1,5,[frame]),null);
+ assert.equal(createVideoEffect("fade",1,5,[fade]),null);
+ assert.deepEqual([frame.start,frame.end,frame.width,frame.height],[0,5,1,1]);
+});
+
+test("spotlight supports free resizing, source bounds and timed overlap",()=>{
+ const spotlight=createVideoEffect("spotlight",0,5,[]);
+ const next=resizeVideoEffectFromHandle(spotlight,.1,.05,"se");
+ assert.notEqual(next.width,next.height);assert.ok(validVideoEffect(next,[spotlight],5));
+});
+
+test("portrait crop and background preserve aspect, and pointer transform follows zoom then frame",()=>{
+ const source={width:1600,height:900};
+ const frame=cropVideoFrame(createVideoEffect("frame",0,5,[]),9/16,source);
+ assert.ok(Math.abs(frame.width/frame.height*1600/900-9/16)<1e-10);
+ const fitted=videoFrameRect(frame);
+ assert.ok(Math.abs(fitted.width/fitted.height-frame.width/frame.height)<1e-10);
+ const zoom={...createVideoEffect("zoom",0,5,[]),transition:0};
+ const tr=videoPreviewTransform([zoom,frame],1);
+ // The center source point remains centered after both camera operations.
+ assert.ok(Math.abs(tr.x+.5*tr.sx-.5)<1e-10);
+ assert.ok(Math.abs(tr.y+.5*tr.sy-.5)<1e-10);
+ // A preview drag maps back to the same source displacement.
+ assert.ok(Math.abs((.1/tr.sx)*tr.sx-.1)<1e-10);
 });

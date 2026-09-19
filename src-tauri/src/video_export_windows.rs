@@ -121,7 +121,10 @@ pub(super) fn platform_export(
     }
     let requires_frame_render = !annotations.is_empty()
         || effects.iter().any(|effect| {
-            (effect.kind == VideoEffectKind::Zoom && effect.transition > 0.0)
+            matches!(
+                effect.kind,
+                VideoEffectKind::Spotlight | VideoEffectKind::Frame | VideoEffectKind::Fade
+            ) || (effect.kind == VideoEffectKind::Zoom && effect.transition > 0.0)
                 || (effect.kind == VideoEffectKind::Mask
                     && (effect.mask_style != VideoMaskStyle::Solid || effect.color != 0))
         });

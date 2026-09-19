@@ -77,6 +77,8 @@ interface Props {
   selectedMarkId?: number | null;
   onSelectionChange?(markId: number | null): void;
   onDocumentChange?(marks: AnnotationMark[]): void;
+  /** Let a video compositor present live drafts through the same effects as export. */
+  onFrame?(canvas: HTMLCanvasElement): void;
   onUndo?(): void;
   onRedo?(): void;
   /** CSS viewport size; document coordinates remain fixed to canvas/region. */
@@ -125,6 +127,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       selectedMarkId,
       onSelectionChange,
       onDocumentChange,
+      onFrame,
       onUndo,
       onRedo,
       viewSize,
@@ -318,6 +321,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         selectedIndex: editing ? null : selectedIndex,
         editingIndex: editing ? editing.index : null,
       });
+      onFrame?.(canvas);
     }, [
       marks,
       draft,
@@ -334,6 +338,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       viewScaleY,
       displaySize,
       getSourceImage,
+      onFrame,
     ]);
 
     useEffect(() => {

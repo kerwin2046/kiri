@@ -48,6 +48,9 @@ impl Default for VideoSegment {
 pub enum VideoEffectKind {
     Zoom,
     Mask,
+    Spotlight,
+    Frame,
+    Fade,
 }
 
 #[repr(u32)]
@@ -282,11 +285,15 @@ fn validate_effects(effects: &[VideoEffect], duration: Option<f64>) -> Result<()
             if (width - height).abs() > 0.000001 {
                 bail!("Zoom must preserve the video aspect ratio");
             }
-            if effects[..index].iter().any(|other| {
-                other.kind == VideoEffectKind::Zoom && start < other.end && end > other.start
-            }) {
-                bail!("Zoom effects must not overlap");
-            }
+        }
+        if matches!(
+            effect.kind,
+            VideoEffectKind::Zoom | VideoEffectKind::Frame | VideoEffectKind::Fade
+        ) && effects[..index]
+            .iter()
+            .any(|other| other.kind == effect.kind && start < other.end && end > other.start)
+        {
+            bail!("Camera or fade effects of the same kind must not overlap");
         }
     }
     Ok(())
@@ -889,6 +896,100 @@ mod tests {
             );
             let after = frame_at_with_edge(&output, 2.7, 128);
             assert!(after.get_pixel(24, 48)[2].abs_diff(after.get_pixel(26, 48)[2]) > 80);
+            std::fs::remove_file(output).unwrap();
+        }
+    }
+
+    #[test]
+    fn new_effects_keep_native_discriminants_and_validate_independent_intervals() {
+        for (kind, value) in [("spotlight", 2), ("frame", 3), ("fade", 4)] {
+            let effect: VideoEffect = serde_json::from_value(
+                serde_json::json!({"kind":kind,"start":0,"end":3,"x":0,"y":0,"width":1,"height":1}),
+            )
+            .unwrap();
+            assert_eq!(effect.kind as u32, value);
+            assert!(validate_effects(&[effect], Some(3.0)).is_ok());
+            assert_eq!(
+                validate_effects(&[effect, effect], Some(3.0)).is_err(),
+                kind != "spotlight"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_spotlight_frame_and_fade_follow_live_source_and_timing() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("presentation-effects.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 128, 96, 30, 2_000_000, false).unwrap();
+        for index in 0..90 {
+            let mut pixels = vec![0u8; 128 * 96 * 4];
+            for y in 0..96 {
+                for x in 0..128 {
+                    let channel = if x >= 64 {
+                        0
+                    } else if index < 45 {
+                        2
+                    } else {
+                        1
+                    };
+                    pixels[(y * 128 + x) * 4 + channel] = 255;
+                    pixels[(y * 128 + x) * 4 + 3] = 255;
+                }
+            }
+            assert!(encoder.append_video(&pixels, index).unwrap());
+        }
+        encoder.finish().unwrap();
+        let clip = VideoSegment {
+            start: 0.0,
+            end: 3.0,
+            speed: 1.0,
+        };
+        for kind in [
+            VideoEffectKind::Spotlight,
+            VideoEffectKind::Frame,
+            VideoEffectKind::Fade,
+        ] {
+            let effect = VideoEffect {
+                kind,
+                start: 0.0,
+                end: 3.0,
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+                strength: 0.8,
+                color: 0xffffff,
+                transition: 0.5,
+                ..Default::default()
+            };
+            let (output, _, _, _) =
+                export_video(&source, &[clip], &[effect], VideoExportPreset::Original).unwrap();
+            let first = frame_at_with_edge(&output, 0.75, 128);
+            let second = frame_at_with_edge(&output, 2.0, 128);
+            match kind {
+                VideoEffectKind::Spotlight => {
+                    assert!(first.get_pixel(30, 48)[0] > 200);
+                    assert!(second.get_pixel(30, 48)[1] > 200);
+                    assert!((25..80).contains(&first.get_pixel(110, 48)[2]));
+                }
+                VideoEffectKind::Frame => {
+                    assert!(first.get_pixel(64, 48)[0] > 200);
+                    assert!(second.get_pixel(64, 48)[1] > 200);
+                    assert!(first.get_pixel(5, 5).0[..3].iter().all(|v| *v > 220));
+                    assert!(first.get_pixel(64, 12).0[..3].iter().all(|v| *v > 220));
+                }
+                VideoEffectKind::Fade => {
+                    let start = frame_at_with_edge(&output, 0.0, 128);
+                    let halfway = frame_at_with_edge(&output, 0.25, 128);
+                    assert!(start.get_pixel(30, 48).0[..3].iter().all(|v| *v > 220));
+                    assert!((90..170).contains(&halfway.get_pixel(30, 48)[1]));
+                    assert!(first.get_pixel(30, 48)[0] > 200 && first.get_pixel(30, 48)[1] < 40);
+                    assert!(second.get_pixel(30, 48)[1] > 200 && second.get_pixel(30, 48)[0] < 40);
+                }
+                _ => unreachable!(),
+            }
             std::fs::remove_file(output).unwrap();
         }
     }

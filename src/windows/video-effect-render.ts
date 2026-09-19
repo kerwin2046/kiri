@@ -1,4 +1,4 @@
-import type {VideoEffect} from "./video-effects";
+import {videoEffectEnvelope,videoFrameRect,videoZoomViewport,type VideoEffect} from "./video-effects";
 
 /** Masks cover annotations too, matching native composition before zoom. */
 export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect[],scratch:HTMLCanvasElement) {
@@ -36,4 +36,25 @@ export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect
     }
     ctx.restore();
   }
+}
+
+/** Ordered identically in the platform encoders: mask, spotlight, zoom, frame, fade. */
+export function paintVideoEffects(ctx:CanvasRenderingContext2D,effects:VideoEffect[],time:number,scratch:HTMLCanvasElement) {
+  paintVideoMasks(ctx,effects,scratch);
+  const {width,height}=ctx.canvas,sample=scratch.getContext("2d");if(!sample)return;
+  for(const effect of effects.filter(e=>e.kind==="spotlight")){
+    const x=Math.floor(effect.x*width),y=Math.floor(effect.y*height),right=Math.ceil((effect.x+effect.width)*width),bottom=Math.ceil((effect.y+effect.height)*height);
+    ctx.save();ctx.fillStyle=`rgba(0,0,0,${effect.strength??.65})`;
+    ctx.beginPath();ctx.rect(0,0,width,height);ctx.rect(x,y,right-x,bottom-y);ctx.fill("evenodd");ctx.restore();
+  }
+  const zoom=effects.find(e=>e.kind==="zoom");
+  if(zoom){const v=videoZoomViewport(zoom,time);scratch.width=width;scratch.height=height;sample.drawImage(ctx.canvas,0,0);ctx.clearRect(0,0,width,height);ctx.drawImage(scratch,v.x*width,v.y*height,v.width*width,v.height*height,0,0,width,height);}
+  const frame=effects.find(e=>e.kind==="frame");
+  if(frame){
+    scratch.width=width;scratch.height=height;sample.drawImage(ctx.canvas,0,0);
+    const r=videoFrameRect(frame);ctx.fillStyle=`#${(frame.color??0).toString(16).padStart(6,"0")}`;ctx.fillRect(0,0,width,height);
+    ctx.drawImage(scratch,frame.x*width,frame.y*height,frame.width*width,frame.height*height,r.x*width,r.y*height,r.width*width,r.height*height);
+  }
+  const fade=effects.find(e=>e.kind==="fade");
+  if(fade){ctx.save();ctx.globalAlpha=1-videoEffectEnvelope(fade,time);ctx.fillStyle=`#${(fade.color??0).toString(16).padStart(6,"0")}`;ctx.fillRect(0,0,width,height);ctx.restore();}
 }

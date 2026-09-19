@@ -9,7 +9,6 @@
 .kiri-video-surface {position:relative; flex:none;}
 .kiri-video-surface video { display:block; width:100%; height:100%; object-fit:contain; }
 .kiri-video-effect-preview {position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
-.kiri-video-view-label {align-self:flex-start;flex:none;height:16px;line-height:16px;margin-top:8px;color:var(--kiri-secondary-label);font-size:10px;}
 .kiri-video-inspector { flex:0 0 232px; padding:16px; overflow:auto; border-left:1px solid var(--kiri-surface-border); background:var(--kiri-card); }
 .kiri-video-inspector .kiri-video-effects {border:0;margin:0;padding:0;}
 .kiri-video-inspector .kiri-video-effects-actions {display:grid;grid-template-columns:1fr;gap:8px;}
@@ -47,22 +46,20 @@
 .kiri-video-trim-handle--end {right:-2px;border-radius:0 3px 3px 0;}
 .kiri-video-trim-handle:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 .kiri-video-playhead {position:absolute;top:-7px;bottom:-5px;width:1px;background:white;z-index:5;pointer-events:none;filter:drop-shadow(1px 0 1px #000);}
-.kiri-video-playhead>span {display:block;position:absolute;top:-2px;left:-4px;width:9px;height:8px;background:white;clip-path:polygon(0 0,100% 0,100% 50%,50% 100%,0 50%);}
+.kiri-video-playhead>span {cursor:ew-resize;pointer-events:auto;touch-action:none;display:block;position:absolute;top:-6px;left:-7px;width:15px;height:14px;background:white;clip-path:polygon(0 0,100% 0,100% 50%,50% 100%,0 50%);}
 .kiri-video-timeline-detail {display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 12px;color:var(--kiri-secondary-label);font-size:10px;min-height:27px;}
 .kiri-video-clip-fields {display:flex;align-items:center;gap:10px;}
 .kiri-video-clip-fields label {display:flex;align-items:center;gap:5px;}
 .kiri-video-clip-fields input {width:62px;}
 .kiri-video-clip-fields input,.kiri-video-quality select {color:var(--kiri-label);background:var(--kiri-group-fill);border:1px solid var(--kiri-surface-border);padding:5px;border-radius:5px;font:inherit;}
-.kiri-video-export-footer {display:flex;gap:12px;align-items:center;border-top:1px solid var(--kiri-surface-border);padding-top:12px;}
 .kiri-video-quality {display:flex;align-items:center;gap:8px;font-size:11px;}
 .kiri-video-quality>span {color:var(--kiri-secondary-label);white-space:nowrap;}
 .kiri-video-export-status {display:flex;gap:8px;align-items:center;color:var(--kiri-secondary-label);font-size:11px;flex:1;line-height:1.45;}
 .kiri-video-timeline input:focus-visible,.kiri-video-timeline select:focus-visible {outline:2px solid var(--kiri-label);outline-offset:2px;}
 @media(max-width:800px) {
  .kiri-video-inspector {flex-basis:188px;padding:12px;}
- .kiri-video-editor-heading span {display:none;}
+ .kiri-video-editor-heading>div:first-child>span {display:none;}
  .kiri-video-timeline {padding:12px 12px 22px;}
- .kiri-video-export-footer {flex-wrap:wrap;}
  .kiri-video-export-status {flex-basis:100%;}
  .kiri-video-quality {flex:1;}
  .kiri-video-tool-divider {display:none;}
@@ -111,8 +108,8 @@
 /* The preview owns remaining height; only the track list scrolls. */
 .kiri-video-player {overflow:hidden;}
 .kiri-video-workspace {position:relative;flex:1 1 0;min-height:120px;}
-.kiri-video-player--editing .kiri-video-stage {margin:8px 12px 14px;}
-.kiri-video-timeline {display:flex;flex-direction:column;flex:0 0 auto;max-height:48%;min-height:160px;padding:8px 14px 4px;box-sizing:border-box;overflow:hidden;}
+.kiri-video-player--editing .kiri-video-stage {margin:12px;}
+.kiri-video-timeline {display:flex;flex-direction:column;flex:0 0 auto;max-height:45%;min-height:160px;padding:8px 14px 4px;box-sizing:border-box;overflow:hidden;}
 .kiri-video-timeline-divider {flex:none;height:7px;cursor:ns-resize;background:var(--kiri-elevated);border-top:1px solid var(--kiri-surface-border);touch-action:none;position:relative;}
 .kiri-video-timeline-divider::after {content:"";position:absolute;width:36px;height:2px;left:calc(50% - 18px);top:2px;border-radius:2px;background:#666;}
 .kiri-video-timeline-divider:focus-visible {outline:1px solid var(--kiri-label);outline-offset:-1px;}
@@ -120,7 +117,7 @@
 .kiri-video-lanes-scroll {flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 6px 4px 0;scrollbar-gutter:stable;}
 .kiri-video-lanes {padding-left:72px;min-width:300px;}
 .kiri-video-lane-label {left:-72px;width:65px;}
-.kiri-video-ruler {position:sticky;top:0;z-index:8;background:var(--kiri-elevated);height:22px;}
+.kiri-video-ruler {position:sticky;top:0;z-index:8;background:var(--kiri-elevated);height:28px;}
 .kiri-video-track {height:50px;}
 .kiri-video-clip {border-radius:4px;min-width:3px;}
 .kiri-video-clip-select {cursor:grab;touch-action:none;justify-content:space-between;padding:4px 8px;}
@@ -133,7 +130,6 @@
 .kiri-video-clip-fields {gap:9px;font-size:10px;}
 .kiri-video-clip-fields .kiri-choice-trigger {min-height:27px;padding:4px 7px;min-width:63px;}
 .kiri-video-clip-fields input {width:63px;}
-.kiri-video-export-footer {flex:none;padding:8px 14px;border-top:1px solid var(--kiri-surface-border);background:var(--kiri-elevated);flex-wrap:nowrap;min-height:55px;box-sizing:border-box;}
 .kiri-video-export-status:empty {display:none;}
 .kiri-video-export-settings {margin-left:auto;max-width:280px;min-width:200px;}
 .kiri-video-unused-effects {margin:8px 0;font-size:10px;color:var(--kiri-secondary-label);}
@@ -146,7 +142,6 @@
  .kiri-video-inspector {position:absolute;right:0;top:0;bottom:0;width:220px;max-height:none;box-sizing:border-box;z-index:6;box-shadow:-3px 0 10px #0004;}
  .kiri-video-timeline {padding:8px 10px 4px;}
  .kiri-video-inspector .kiri-video-effects-actions {display:grid;}
- .kiri-video-export-footer {flex-wrap:nowrap;padding:7px 10px;gap:8px;}
  .kiri-video-export-status {flex-basis:auto;font-size:10px;}
  .kiri-video-header-actions {gap:5px!important;}.kiri-video-editor-heading {padding:8px 10px;gap:8px;min-height:46px;}
  .kiri-video-edit-tools button {padding:0 7px;font-size:11px;}.kiri-video-clock {font-size:10px;min-width:94px;}
@@ -158,7 +153,6 @@
  .kiri-video-edit-tools>.kiri-button {font-size:0;gap:0;width:28px;}.kiri-video-edit-tools>.kiri-button svg {width:14px;}
  .kiri-video-lanes {padding-left:56px;min-width:230px;}.kiri-video-lane-label {left:-56px;width:50px;}
  .kiri-video-export-settings {min-width:155px;}.kiri-video-export-settings-title,.kiri-video-export-settings-detail {display:none;}
- .kiri-video-export-footer>.kiri-button {font-size:11px;padding:0 9px;}
  .kiri-video-clip-fields {gap:6px;}.kiri-video-clip-fields>span:first-child {display:none;}
  .kiri-video-clip-fields input {width:49px;}
 }
@@ -166,7 +160,7 @@
 /* Adding/selecting a track never changes the preview bounds. */
 .kiri-video-inspector {position:absolute;right:0;top:0;bottom:0;width:232px;max-height:none;box-sizing:border-box;z-index:6;}
 .kiri-video-lanes-scroll {overflow-anchor:none;}
-.kiri-video-annotation-toolbar-host {height:90px;overflow:hidden;}
+.kiri-video-annotation-toolbar-host {height:44px;overflow:hidden;}
 .kiri-video-sticker-error {flex:none;margin:0;padding:6px 12px;font-size:11px;}
 
 .kiri-video-player--editing .kiri-video-workspace {padding-right:232px;}
@@ -179,4 +173,12 @@
  .kiri-video-inspector {width:145px;padding:8px;}
 }
 
-.kiri-video-sticker-annotation-layer {position:absolute;inset:0;pointer-events:none;z-index:5;}
+
+.kiri-video-surface {overflow:hidden;}
+.kiri-video-annotation-editor .annotation-canvas-root>canvas {opacity:0;}
+.kiri-video-clip-select[data-reorderable=false] {cursor:ew-resize;}
+.kiri-video-ruler input {touch-action:none;}
+.kiri-video-playhead>span::before {content:"";position:absolute;inset:-5px;}
+.kiri-video-editor-heading {position:relative;z-index:20;}
+
+.kiri-video-clip-select:active:not(:disabled),.kiri-video-effect-bar-body:active:not(:disabled) {transform:none;}
