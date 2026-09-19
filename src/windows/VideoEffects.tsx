@@ -10,8 +10,7 @@ import {VideoTimeInput} from "./VideoTimeInput";
 import "./video-effects.css";
 import {ChoiceSelect} from "../components/ChoiceSelect";
 import {VideoEffectSlider as EffectSlider} from "./VideoEffectSlider";
-import {VideoMaskSample} from "./VideoMaskSample";
-export type VideoEffectsProps={frameSource?:{current:HTMLCanvasElement|null};video?:HTMLVideoElement|null;regionLabel?:string;effects:VideoEffect[];onChange(effects:VideoEffect[],transient?:boolean):void;selectedId:string|null;onSelect(id:string|null):void;time:number;duration:number;disabled?:boolean;onSeek?(time:number):void;sourceSize?:{width:number;height:number};transform?:{x:number;y:number;sx:number;sy:number;clip:{x:number;y:number;width:number;height:number}};};
+export type VideoEffectsProps={regionLabel?:string;effects:VideoEffect[];onChange(effects:VideoEffect[],transient?:boolean):void;selectedId:string|null;onSelect(id:string|null):void;time:number;duration:number;disabled?:boolean;onSeek?(time:number):void;sourceSize?:{width:number;height:number};transform?:{x:number;y:number;sx:number;sy:number;clip:{x:number;y:number;width:number;height:number}};};
 
 const effectIcons={zoom:Focus,mask:Shield,spotlight:Scan,frame:Frame,fade:SunMoon};
 const effectDescriptions={
@@ -45,7 +44,7 @@ export function VideoEffectsControls(props:VideoEffectsProps){
       <div className="kiri-effect-section-title"><strong>{t(effectLabels[selected.kind])}</strong><button type="button" className="kiri-effect-delete" aria-label={t("Delete effect")} title={t("Delete effect")} onClick={()=>{props.onChange(props.effects.filter(effect=>effect.id!==selected.id));props.onSelect(null);}}><Trash2 size={14}/></button></div>
       <p className="kiri-effect-description">{t(effectDescriptions[selected.kind])}</p>
       {selected.kind==="mask"&&<><div className="kiri-effect-styles" role="group" aria-label={t("Mask style")}>
-        {(["solid","blur","pixelate"] as const).map(style=><button type="button" key={style} className="kiri-effect-style" aria-pressed={(selected.maskStyle??"solid")===style} onClick={()=>update({...selected,maskStyle:style})}><VideoMaskSample frameSource={props.frameSource} video={props.video??null} effect={{...selected,maskStyle:style}}/><span>{t(style==="solid"?"Solid":style==="blur"?"Blur":"Pixel")}</span></button>)}
+        {(["solid","blur","pixelate"] as const).map(style=><button type="button" key={style} className="kiri-effect-style" aria-pressed={(selected.maskStyle??"solid")===style} onClick={()=>update({...selected,maskStyle:style})}><span>{t(style==="solid"?"Solid":style==="blur"?"Blur":"Pixel")}</span></button>)}
       </div>{(selected.maskStyle??"solid")==="solid"?colors(t("Color")):<EffectSlider label={t("Intensity")} min={0} max={1} step={.01} value={selected.strength??.5} text={`${Math.round((selected.strength??.5)*100)}%`} onChange={(strength,transient)=>update({...selected,strength},transient)}/>}</>}
       {selected.kind==="zoom"&&<EffectSlider label={t("Zoom scale")} min={1.5} max={4} step={.05} value={1/selected.width} text={`${(1/selected.width).toFixed(2)}×`} onChange={(value,transient)=>{const size=1/value;update({...selected,width:size,height:size,x:clamp(selected.x+(selected.width-size)/2,0,1-size),y:clamp(selected.y+(selected.height-size)/2,0,1-size)},transient);}}/>}
       {selected.kind==="spotlight"&&<EffectSlider label={t("Dim surroundings")} min={0} max={1} step={.01} value={selected.strength??.65} text={`${Math.round((selected.strength??.65)*100)}%`} onChange={(strength,transient)=>update({...selected,strength},transient)}/>}

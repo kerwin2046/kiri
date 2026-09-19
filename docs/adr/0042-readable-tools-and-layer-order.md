@@ -15,7 +15,9 @@ Effect choices describe a concrete purpose before exposing parameters. The
 main list contains zooming a detail, hiding private information and highlighting
 an area. Crop/background and fade remain available under finishing touches.
 The inspector offers a clear return to the tool list; precise source times are
-secondary to direct manipulation on the timeline.
+secondary to direct manipulation on the timeline. Mask styles use compact named
+choices and are evaluated in the central picture; this replaces the separate
+region samples specified by ADR 0039.
 
 Each track has a left grip for vertical order, a middle for horizontal movement
 and wider end handles for timing. Pointer drags and keyboard adjustments use the

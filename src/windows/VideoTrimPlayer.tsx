@@ -37,7 +37,6 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   const canvas = useRef<HTMLCanvasElement>(null);
   const liveAnnotation=useRef<{marks:AnnotationMark[];draft:AnnotationMark|null;editingId:number|null}|null>(null),redrawComposite=useRef<(()=>void)|null>(null);
   const receiveLiveMarks=useCallback((marks:AnnotationMark[],draft:AnnotationMark|null,editingId:number|null)=>{liveAnnotation.current={marks,draft,editingId};redrawComposite.current?.();},[]);
-  const maskPreviewFrame=useRef<HTMLCanvasElement|null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const saving = useRef(false);
@@ -231,23 +230,16 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
           return mark&&mark.id!==live?.editingId?[{...item,mark}]:[];
         });
         const draft=live?.draft?[{id:"draft",mark:live.draft,start:0,end:duration,layer:nextVideoLayer([...effects,...annotations,...stickers])}]:[];
-        const overlays=active.filter(item=>!isVideoAdjustment(item));
-        const selectedMask=effects.find(item=>item.id===effectId&&item.kind==="mask");
-        // Style samples follow the current frame even outside the mask's visible interval.
-        if(selectedMask&&!overlays.includes(selectedMask))overlays.push(selectedMask);
-        const layers=orderedVideoLayers([...overlays,...stickers.filter(item=>player.currentTime>=item.start&&player.currentTime<item.end),...activeAnnotations,...draft]);
+        const layers=orderedVideoLayers([...active.filter(item=>!isVideoAdjustment(item)),...stickers.filter(item=>player.currentTime>=item.start&&player.currentTime<item.end),...activeAnnotations,...draft]);
         for(const item of layers){
           if("mark" in item){sourceCtx.save();sourceCtx.scale(buffer.width/sourceSize.width,buffer.height/sourceSize.height);paintVideoAnnotation(sourceCtx,item.mark,sourceSize,sourceFrame);sourceCtx.restore();}
           else if("dataUrl" in item){const image=stickerImages.current.get(item.id);if(image)sourceCtx.drawImage(image,item.x*buffer.width,item.y*buffer.height,item.width*buffer.width,item.height*buffer.height);}
           else{
-            if(item.id===effectId&&item.kind==="mask"){const preview=maskPreviewFrame.current??(maskPreviewFrame.current=document.createElement("canvas"));preview.width=buffer.width;preview.height=buffer.height;preview.getContext("2d")?.drawImage(buffer,0,0);}
-            if(item===selectedMask&&!active.includes(item))continue;
             paintVideoEffect(sourceCtx,item,player.currentTime,maskScratch);
           }
         }
         paintVideoEffects(sourceCtx,active.filter(isVideoAdjustment),player.currentTime,maskScratch);
         ctx.clearRect(0,0,output.width,output.height);ctx.drawImage(buffer,0,0);
-        if(selectedMask)player.dispatchEvent(new Event("kiri-mask-preview-frame"));
       }
       if(!player.paused||repaintAttempts-->0) frame=requestAnimationFrame(draw);
     };
@@ -460,7 +452,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
           const current=docRef.current,selected=current.annotations.find(item=>item.id===selectedAnnotation.id);if(!selected)return;
           const next={...selected,[edge]:value};if(!Number.isFinite(value)||next.start<0||next.end>duration||next.end-next.start<.05-1e-9)return;apply({...current,annotations:current.annotations.map(item=>item.id===next.id?next:item)});setAnnotationRevision(v=>v+1);
         }}/></label>)}<button type="button" className="kiri-button kiri-button--secondary" disabled={busy} onClick={()=>{commitAnnotation.current?.();apply({...docRef.current,annotations:docRef.current.annotations.filter(item=>item.id!==selectedAnnotation.id)});setAnnotationId(null);setAnnotationRevision(v=>v+1);}}><Trash2 size={14}/>{t("Delete annotation")}</button></>}
-        </section>:<VideoEffectsControls frameSource={maskPreviewFrame} video={video.current} sourceSize={sourceSize} effects={effects} onChange={changeEffects} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
+        </section>:<VideoEffectsControls sourceSize={sourceSize} effects={effects} onChange={changeEffects} selectedId={effectId} onSelect={id=>{video.current?.pause();previewing.current=false;setEffectId(id);}} time={time} duration={duration} disabled={busy} onSeek={seek} />}</aside>}
     </div>
     {!editing&&<VideoPlaybackControls video={video}/>}
     {editing&&<><div className="kiri-video-timeline-divider" role="separator" aria-label={t("Timeline height")} aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={360} aria-valuenow={timelineHeight} tabIndex={0} onPointerDown={resizeTimeline} onDoubleClick={()=>setTimelineHeight(230)} onKeyDown={event=>{if(["ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();setTimelineHeight(value=>Math.max(160,Math.min(360,(container.current?.clientHeight??700)*.45,value+(event.key==="ArrowUp"?20:-20))));}}}/><section className="kiri-video-timeline" aria-label={t("Video timeline")} style={{height:timelineHeight}}>
