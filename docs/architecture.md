@@ -422,6 +422,10 @@ and retains the input, output and frames as `windows-video-export-review` artifa
 This complements the existing isolated countdown/recording desktop check; UTM is
 not required for these checks. Hardware-specific drivers and consumer Windows
 permission behavior remain outside the hosted runner's coverage.
+The desktop check repeats click and Escape countdown cancellation three times
+each before recording, pausing, resuming and stopping. On failure, its isolated
+runner retains Kiri-specific Windows crash events and minidumps; the matching
+optimized executable and debug symbols are kept separately for diagnosis.
 
 The explicit microphone check samples the system default input through cpal
 for at most five seconds, sends only device name and levels to the owning

@@ -89,6 +89,10 @@ jobs:
   build-windows:
     name: Build and test Windows app (Server 2025)
     runs-on: windows-2025
+    env:
+      # Keep optimized runtime behavior, with symbols for native crash reports.
+      CARGO_PROFILE_RELEASE_DEBUG: "1"
+      CARGO_PROFILE_RELEASE_STRIP: "none"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -141,10 +145,12 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7
-        if: failure() && github.event_name == 'pull_request'
+        if: failure()
         with:
           name: countdown-debug-build
-          path: src-tauri/target/release/kiri.exe
+          path: |
+            src-tauri/target/release/kiri.exe
+            src-tauri/target/release/*.pdb
           retention-days: 2
           if-no-files-found: warn
       - name: Upload Windows bundle

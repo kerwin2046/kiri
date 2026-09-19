@@ -2,10 +2,12 @@
 import ctypes,json,os,re,subprocess,time
 from pathlib import Path
 from pywinauto import Desktop,keyboard,mouse
+from windows_crash_report import configure_crash_capture,collect_crash_details
 
 if os.environ.get('GITHUB_ACTIONS')!='true':raise SystemExit('Use an isolated CI desktop')
 OUT=Path('countdown-native-review');OUT.mkdir(exist_ok=True)
 report={'success':False,'native':True,'checks':[]}
+configure_crash_capture(OUT)
 app=Path('src-tauri/target/release/kiri.exe').resolve()
 proc=subprocess.Popen([str(app)]);pid=proc.pid
 desktop=Desktop(backend='uia');source_window=None
@@ -45,7 +47,7 @@ try:
  subprocess.Popen(['notepad.exe',str(sample)])
  source_window=desktop.window(title_re='.*kiri-countdown-check.*')
  source_window.wait('visible',timeout=20);source_window.set_focus();time.sleep(.5)
- for mode in ['click','Escape']:
+ for mode in ['click','Escape']*3:
   cancel=begin();parent=cancel.top_level_parent();h=parent.handle
   if not parent.is_visible():raise RuntimeError('Countdown is not visible')
   if ctypes.windll.user32.GetForegroundWindow()!=h:raise RuntimeError('Countdown lacks native focus')
@@ -73,7 +75,7 @@ try:
  report['checks'].append('countdown completed; recording started, paused, resumed and stopped')
  report['success']=True
 except Exception as error:
- report['error']=str(error)[:1500];report['process_exit_code']=proc.poll();report['windows']=[]
+ report['error']=str(error)[:1500];report.update(collect_crash_details(OUT,proc));report['windows']=[]
  for w in windows():
   try:report['windows'].append({'title':w.window_text(),'controls':[{'type':c.element_info.control_type,'text':c.window_text()} for c in w.descendants()]})
   except Exception:pass
