@@ -334,15 +334,19 @@ function drawMosaicMark(
     // Gaussian-blur mosaic: draw the source crop into an offscreen canvas,
     // blur it, and stamp it through the brush-stroke clip. The blur radius
     // scales with the brush diameter and the intensity preset.
-    const off = document.createElement("canvas");
-    off.width = cw;
-    off.height = ch;
-    const offCtx = off.getContext("2d")!;
-    offCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
     const blurPx = mosaicBlurRadius(mark.brushDiameter, mark.intensity, scale);
-    blurCanvas(off,blurPx*cw/drawW);
+    const sourceRadius=blurPx*cw/drawW,pad=Math.ceil(sourceRadius*3);
+    // Sample beyond the stroke so a small brush can soften details that fill it.
+    const sx=Math.max(0,cx-pad),sy=Math.max(0,cy-pad);
+    const sw=Math.min(sourceW,cx+cw+pad)-sx,sh=Math.min(sourceH,cy+ch+pad)-sy;
+    const off = document.createElement("canvas");
+    off.width = sw;
+    off.height = sh;
+    const offCtx = off.getContext("2d")!;
+    offCtx.drawImage(r.sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
+    blurCanvas(off,sourceRadius);
     clipToMosaicStroke(ctx, points, clipDiameter);
-    ctx.drawImage(off, 0, 0, cw, ch, drawX, drawY, drawW, drawH);
+    ctx.drawImage(off, 0, 0, sw, sh, drawX+(sx-cx)*drawW/cw, drawY+(sy-cy)*drawH/ch, sw*drawW/cw, sh*drawH/ch);
     ctx.restore();
     return;
   }
