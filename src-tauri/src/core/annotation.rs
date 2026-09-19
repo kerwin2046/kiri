@@ -110,7 +110,7 @@ pub struct AnnotationAppearance {
 impl Default for AnnotationAppearance {
     fn default() -> Self {
         Self {
-            color_preset: AnnotationColor::Violet,
+            color_preset: AnnotationColor::Cherry,
             text_background_style: TextBackground::Transparent,
             mosaic_intensity: MosaicIntensity::Standard,
             mosaic_style: MosaicStyle::Pixel,
@@ -484,6 +484,9 @@ mod tests {
     fn annotation_appearance_defaults_and_clamps_visual_sizes() {
         let defaults: AnnotationAppearance = serde_json::from_str("{}").unwrap();
         assert_eq!(defaults, AnnotationAppearance::default());
+        assert_eq!(defaults.color_preset, AnnotationColor::Cherry);
+        let saved: AnnotationAppearance = serde_json::from_str(r#"{"colorPreset":"violet"}"#).unwrap();
+        assert_eq!(saved.color_preset, AnnotationColor::Violet);
 
         let oversized: AnnotationAppearance = serde_json::from_str(
             r#"{

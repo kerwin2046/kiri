@@ -16,3 +16,7 @@
 .kiri-video-annotation-surface {position:relative;pointer-events:auto;}
 
 .kiri-video-annotation-tools--hosted {position:relative;inset:auto;border:0;border-bottom:1px solid var(--kiri-surface-border);border-radius:0;padding:6px 12px;}
+
+.kiri-video-annotation-tools--hosted {height:90px;box-sizing:border-box;align-content:flex-start;overflow:auto;overflow-anchor:none;}
+.kiri-video-annotation-appearance {flex-wrap:nowrap;min-height:30px;}
+.kiri-video-annotation-appearance>* {flex-shrink:0;}

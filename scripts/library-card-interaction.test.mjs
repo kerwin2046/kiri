@@ -294,3 +294,20 @@ for (const outcome of ["ready", "rejected"]) {
     card.unmount();
   });
 }
+
+test("media drops import local paths once while an import is pending", async () => {
+  const pending = deferred();
+  const calls = [];
+  const harness = createLibraryHarness({ importMedia: (paths) => { calls.push(paths); return pending.promise; } });
+  const library = harness.mount("LibraryWindow", {});
+  library.render(); await settleRequests(); library.render(); await settleRequests();
+  harness.emit("mediaDrop", { payload: { type: "enter", paths: ["/fixture/photo.png"] } });
+  assert.equal(calls.length, 0);
+  harness.emit("mediaDrop", { payload: { type: "drop", paths: ["/fixture/photo.png"] } });
+  harness.emit("mediaDrop", { payload: { type: "drop", paths: ["/fixture/other.png"] } });
+  assert.deepEqual(calls, [["/fixture/photo.png"]]);
+  pending.resolve({ ids: ["imported"], failed: 0 }); await settleRequests();
+  const status = nodes(library.render()).find(node => node?.props?.role === "status");
+  assert.ok(status);
+  library.unmount();
+});

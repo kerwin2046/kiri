@@ -162,3 +162,21 @@
  .kiri-video-clip-fields {gap:6px;}.kiri-video-clip-fields>span:first-child {display:none;}
  .kiri-video-clip-fields input {width:49px;}
 }
+
+/* Adding/selecting a track never changes the preview bounds. */
+.kiri-video-inspector {position:absolute;right:0;top:0;bottom:0;width:232px;max-height:none;box-sizing:border-box;z-index:6;}
+.kiri-video-lanes-scroll {overflow-anchor:none;}
+.kiri-video-annotation-toolbar-host {height:90px;overflow:hidden;}
+.kiri-video-sticker-error {flex:none;margin:0;padding:6px 12px;font-size:11px;}
+
+.kiri-video-player--editing .kiri-video-workspace {padding-right:232px;}
+@media(max-width:700px){
+ .kiri-video-player--editing .kiri-video-workspace {padding-right:180px;}
+ .kiri-video-inspector {width:180px;box-shadow:none;}
+}
+@media(max-width:420px){
+ .kiri-video-player--editing .kiri-video-workspace {padding-right:145px;}
+ .kiri-video-inspector {width:145px;padding:8px;}
+}
+
+.kiri-video-sticker-annotation-layer {position:absolute;inset:0;pointer-events:none;z-index:5;}

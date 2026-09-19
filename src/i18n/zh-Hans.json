@@ -435,7 +435,6 @@
   "Effect %d: %@ to %@": "效果 %d：%@ 至 %@",
   "Effect %d start": "效果 %d 起点",
   "Effect %d end": "效果 %d 终点",
-  "Annotate video": "标注视频",
   "Annotation timing": "标注时间",
   "Each annotation has its own track. Drag its edges to set when it appears.": "每个标注都有独立轨道，拖动两端调整显示时段。",
   "Delete annotation": "删除标注",
@@ -484,5 +483,16 @@
   "Source out": "原片出点",
   "%d effects outside the edit": "%d 个效果位于剪辑范围外",
   "These effects stay saved but do not appear in this export.": "这些效果仍会保留，但不会出现在本次导出中。",
-  "Changing clip speed also changes audio pitch on Windows.": "Windows 上调整片段速度也会改变音调。"
+  "Changing clip speed also changes audio pitch on Windows.": "Windows 上调整片段速度也会改变音调。",
+  "Sticker": "贴图",
+  "Add image sticker": "添加图片贴图",
+  "Delete sticker": "删除贴图",
+  "Drag to move. Resize with the handles; set timing on its track.": "拖动移动，拖动控制点调整大小；在轨道上调整显示时段。",
+  "Choose a PNG, JPEG or WebP image up to 10 MB and 16 megapixels.": "请选择不超过 10 MB、1600 万像素的 PNG、JPEG 或 WebP 图片。",
+  "Import media": "导入素材",
+  "Importing…": "正在导入…",
+  "Import local images or videos": "导入本地图片或视频",
+  "Drop images or videos to import": "拖入图片或视频，添加到素材库",
+  "Imported %d files; %d could not be imported.": "已导入 %d 个文件，%d 个未能导入。",
+  "Could not import these files. Choose supported local images or videos.": "无法导入这些文件，请选择本地 PNG、JPEG、WebP 图片或 MP4、MOV 视频。"
 }

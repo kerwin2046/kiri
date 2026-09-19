@@ -1129,6 +1129,97 @@ impl Drop for VideoExportPermit {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaImportResult {
+    ids: Vec<String>,
+    failed: usize,
+}
+
+#[tauri::command]
+pub async fn import_media(
+    app: AppHandle,
+    window: WebviewWindow,
+    paths: Option<Vec<String>>,
+) -> Result<MediaImportResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    require_library_window(&window)?;
+    let selected: Vec<PathBuf> = if let Some(paths) = paths {
+        paths.into_iter().map(PathBuf::from).collect()
+    } else {
+        let dialog_app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            dialog_app
+                .dialog()
+                .file()
+                .add_filter(
+                    "Images and videos",
+                    &["png", "jpg", "jpeg", "webp", "mp4", "mov"],
+                )
+                .blocking_pick_files()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|path| path.into_path().ok())
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+    if selected.len() > 32 {
+        return Err("Import at most 32 files at a time".into());
+    }
+    let state = app.state::<AppState>();
+    let (identity, generation) = {
+        let context = state.library.lock().unwrap();
+        (
+            context.expected_library_id(),
+            context.expected_library_generation(),
+        )
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut result = MediaImportResult {
+            ids: vec![],
+            failed: 0,
+        };
+        for path in selected {
+            let imported = (|| -> Result<String, String> {
+                let prepared = crate::media_import::prepare(&path).map_err(|e| e.to_string())?;
+                let state = app.state::<AppState>();
+                let mut context = state.library.lock().unwrap();
+                if context.expected_library_id() != identity
+                    || context.expected_library_generation() != generation
+                {
+                    return Err("Library changed during import".into());
+                }
+                let asset = context
+                    .library_mut()
+                    .map_err(|e| e.to_string())?
+                    .import_file(
+                        prepared.file.path(),
+                        prepared.kind,
+                        prepared.extension,
+                        prepared.width,
+                        prepared.height,
+                        prepared.duration,
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(asset.id.to_string())
+            })();
+            match imported {
+                Ok(id) => result.ids.push(id),
+                Err(_) => result.failed += 1,
+            }
+        }
+        if !result.ids.is_empty() {
+            emit_library_changed(&app);
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn export_video_copy(
     app: AppHandle,

@@ -437,3 +437,22 @@ intersections into the continuous output timeline. Output duration is the sum of
 `(end - start) / speed`. macOS scales composition video/audio ranges and maps filter
 time back through clip speed. Windows renders source effects before its bounded
 frame/audio rate conversion. Viewer playback speed is independent of clip speed.
+
+## Local media import and video stickers
+
+The library's import command is restricted to the library window. Native file
+selection and WebView file drops share a bounded background import path. Images
+use bounded Rust decoders, apply orientation and normalize to a temporary PNG;
+video files are copied to an isolated snapshot and probed through platform media
+APIs. The import checks library identity/generation before publishing each asset.
+Per-file failures are reported alongside successful imports without discarding
+successful copies or changing the original files.
+
+Video annotation controls remain mounted in a fixed toolbar and share the same
+persisted appearance settings as screenshots. Empty preferences default to Cherry;
+saved choices are not migrated. Image stickers live in the edit/undo document as
+normalized local PNGs with source-time ranges and normalized geometry. They use
+the existing native annotation overlay export boundary, after other annotations
+and before privacy masks/zoom. Static stickers preserve alpha; corner resizing
+preserves aspect ratio. Mask style samples use the actual composed source frame
+and the same frontend effect renderer as preview. No image is uploaded.

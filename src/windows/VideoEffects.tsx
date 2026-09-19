@@ -6,7 +6,8 @@ import {activeVideoEffects,clamp,createVideoEffect,moveVideoEffect,resizeVideoEf
 import type {VideoEffect,EffectHandle} from "./video-effects";
 import {VideoTimeInput} from "./VideoTimeInput";
 import "./video-effects.css";
-export type VideoEffectsProps={effects:VideoEffect[];onChange(effects:VideoEffect[],transient?:boolean):void;selectedId:string|null;onSelect(id:string|null):void;time:number;duration:number;disabled?:boolean;onSeek?(time:number):void;onPreview?(effectId:string):void;};
+import {VideoMaskSample} from "./VideoMaskSample";
+export type VideoEffectsProps={frameSource?:{current:HTMLCanvasElement|null};video?:HTMLVideoElement|null;regionLabel?:string;effects:VideoEffect[];onChange(effects:VideoEffect[],transient?:boolean):void;selectedId:string|null;onSelect(id:string|null):void;time:number;duration:number;disabled?:boolean;onSeek?(time:number):void;onPreview?(effectId:string):void;};
 
 function EffectSlider(props:{label:string;value:number;min:number;max:number;step:number;text:string;disabled?:boolean;onChange(value:number,transient:boolean):void}){
   const dragging=useRef(false),latest=useRef(props.value);
@@ -32,7 +33,7 @@ export function VideoEffectsControls(props:VideoEffectsProps){
       <div className="kiri-effect-section-title"><span>{t(selected.kind==="zoom"?"Zoom":"Privacy mask")}</span><button type="button" className="kiri-effect-delete" disabled={props.disabled} aria-label={t("Delete effect")} title={t("Delete effect")} onClick={()=>{props.onChange(props.effects.filter(effect=>effect.id!==selected.id));props.onSelect(null);}}><Trash2 size={14}/></button></div>
       <button type="button" className="kiri-effect-preview" disabled={props.disabled} onClick={()=>{if(props.onPreview)props.onPreview(selected.id);else props.onSelect(null);}}><Play size={14}/>{t("Preview this effect")}</button>
       {selected.kind==="mask"?<><div className="kiri-effect-styles" role="group" aria-label={t("Mask style")}>
-        {(["solid","blur","pixelate"] as const).map(style=><button type="button" key={style} className="kiri-effect-style" disabled={props.disabled} aria-pressed={(selected.maskStyle??"solid")===style} onClick={()=>update({...selected,maskStyle:style})}><span className={`kiri-effect-style-sample kiri-effect-style-sample--${style}`} aria-hidden="true"><i/><i/><i/></span><span>{t(style==="solid"?"Solid":style==="blur"?"Blur":"Pixel")}</span></button>)}
+        {(["solid","blur","pixelate"] as const).map(style=><button type="button" key={style} className="kiri-effect-style" disabled={props.disabled} aria-pressed={(selected.maskStyle??"solid")===style} onClick={()=>update({...selected,maskStyle:style})}><VideoMaskSample frameSource={props.frameSource} video={props.video??null} effect={{...selected,maskStyle:style}}/><span>{t(style==="solid"?"Solid":style==="blur"?"Blur":"Pixel")}</span></button>)}
       </div>{(selected.maskStyle??"solid")==="solid"?<div className="kiri-effect-colors"><span>{t("Color")}</span>{[0,0xffffff].map(color=><button type="button" key={color} className="kiri-effect-color" disabled={props.disabled} aria-label={t(color?"White":"Black")} aria-pressed={(selected.color??0)===color} style={{background:color?"#fff":"#000"}} onClick={()=>update({...selected,color})}/>)}<label className="kiri-effect-custom-color" title={t("Custom color")}><input type="color" aria-label={t("Custom color")} value={`#${(selected.color??0).toString(16).padStart(6,"0")}`} onChange={event=>update({...selected,color:parseInt(event.target.value.slice(1),16)})}/><span>{t("Custom color")}</span></label></div>:<EffectSlider label={t("Intensity")} min={0} max={1} step={.01} value={selected.strength??.5} text={`${Math.round((selected.strength??.5)*100)}%`} onChange={(strength,transient)=>update({...selected,strength},transient)}/>}
       <p className="kiri-effect-note">{t("The mask follows the original image before zoom is applied.")}</p></>:<>
         <EffectSlider label={t("Zoom scale")} min={1.5} max={4} step={.05} value={1/selected.width} text={`${(1/selected.width).toFixed(2)}×`} onChange={(value,transient)=>{const size=1/value;update({...selected,width:size,height:size,x:clamp(selected.x+(selected.width-size)/2,0,1-size),y:clamp(selected.y+(selected.height-size)/2,0,1-size)},transient);}}/>
@@ -47,15 +48,26 @@ export function VideoEffectsControls(props:VideoEffectsProps){
   </section>;
 }
 
+function resizeSticker(effect:VideoEffect,dx:number,dy:number,handle:EffectHandle):VideoEffect{
+  const west=handle.includes("w"),north=handle.includes("n");
+  const horizontal=(west?-dx:dx)/effect.width,vertical=(north?-dy:dy)/effect.height;
+  const change=Math.abs(horizontal)>Math.abs(vertical)?horizontal:vertical;
+  const anchorX=west?effect.x+effect.width:effect.x,anchorY=north?effect.y+effect.height:effect.y;
+  const limit=Math.min((west?anchorX:1-anchorX)/effect.width,(north?anchorY:1-anchorY)/effect.height);
+  const scale=Math.min(limit,Math.max(.01/effect.width,.01/effect.height,1+change));
+  const width=effect.width*scale,height=effect.height*scale;
+  return {...effect,x:west?anchorX-width:anchorX,y:north?anchorY-height:anchorY,width,height};
+}
+
 type Gesture = {id: string; x: number; y: number; width: number; height: number; mode: "move" | EffectHandle; original: VideoEffect[]; latest: VideoEffect[]};
 
 export function VideoEffectsOverlay(props: VideoEffectsProps) {
   const layer = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const selected = props.effects.find(effect => effect.id === props.selectedId);
-  if (!selected) return null;
+
   const visible = activeVideoEffects(props.effects, props.time);
-  if (!visible.some(effect => effect.id === selected.id)) visible.push(selected);
+  if (selected&&!visible.some(effect => effect.id === selected.id)) visible.push(selected);
   function begin(event: PointerEvent<HTMLElement>, effect: VideoEffect, mode: "move" | EffectHandle) {
     if (props.disabled || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
@@ -71,7 +83,7 @@ export function VideoEffectsOverlay(props: VideoEffectsProps) {
     if (!state) return;
     const effect = state.original.find(item => item.id === state.id)!;
     const dx = (event.clientX - state.x) / state.width, dy = (event.clientY - state.y) / state.height;
-    const next = state.mode === "move" ? moveVideoEffect(effect, dx, dy) : resizeVideoEffectFromHandle(effect, dx, dy, state.mode);
+    const next = state.mode === "move" ? moveVideoEffect(effect, dx, dy) : (props.regionLabel?resizeSticker(effect,dx,dy,state.mode):resizeVideoEffectFromHandle(effect, dx, dy, state.mode));
     state.latest = state.original.map(item => item.id === next.id ? next : item);
     props.onChange(state.latest, true);
   }
@@ -86,20 +98,20 @@ export function VideoEffectsOverlay(props: VideoEffectsProps) {
     const step = event.shiftKey ? 0.02 : 0.002;
     const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
     const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
-    const next = handle ? resizeVideoEffectFromHandle(effect, dx, dy, handle) : moveVideoEffect(effect, dx, dy);
+    const next = handle ? (props.regionLabel?resizeSticker(effect,dx,dy,handle):resizeVideoEffectFromHandle(effect, dx, dy, handle)) : moveVideoEffect(effect, dx, dy);
     props.onChange(props.effects.map(item => item.id === next.id ? next : item));
   }
   return <div ref={layer} className="kiri-video-effects-overlay">
     {visible.map(effect => <div key={effect.id} role="button" tabIndex={props.disabled ? -1 : 0}
-      aria-label={t(effect.kind === "zoom" ? "Move zoom region" : "Move privacy mask")}
+      aria-label={props.regionLabel??t(effect.kind === "zoom" ? "Move zoom region" : "Move privacy mask")}
       aria-pressed={effect.id === props.selectedId}
-      className={`kiri-video-effect-region kiri-video-effect-region--${effect.kind}${effect.id === props.selectedId ? " is-selected" : ""}`}
+      className={`kiri-video-effect-region${props.regionLabel?" kiri-video-effect-region--sticker":""} kiri-video-effect-region--${effect.kind}${effect.id === props.selectedId ? " is-selected" : ""}`}
       style={{left: `${effect.x * 100}%`, top: `${effect.y * 100}%`, width: `${effect.width * 100}%`, height: `${effect.height * 100}%`}}
       onPointerDown={event => begin(event, effect, "move")} onPointerMove={move} onPointerUp={() => finish()} onPointerCancel={() => finish(true)}
       onKeyDown={event => keyboard(event, effect, null)} onFocus={() => {if (!props.disabled) props.onSelect(effect.id);}}>
-      <span className="kiri-video-effect-tag">{t(effect.kind === "zoom" ? "Zoom" : "Privacy mask")}</span>
+      {(!props.regionLabel||effect.id===props.selectedId)&&<span className="kiri-video-effect-tag">{props.regionLabel??t(effect.kind === "zoom" ? "Zoom" : "Privacy mask")}</span>}
       {effect.kind === "zoom" && <span className="kiri-video-effect-center" aria-hidden="true">+</span>}
-      {effect.id === props.selectedId && (["nw","n","ne","e","se","s","sw","w"] as EffectHandle[]).map(handle=><button key={handle} type="button" className={`kiri-video-effect-resize kiri-video-effect-resize--${handle}`} disabled={props.disabled}
+      {effect.id === props.selectedId && ((props.regionLabel?["nw","ne","se","sw"]:["nw","n","ne","e","se","s","sw","w"]) as EffectHandle[]).map(handle=><button key={handle} type="button" className={`kiri-video-effect-resize kiri-video-effect-resize--${handle}`} disabled={props.disabled}
         aria-label={t(({nw:"Resize top-left",n:"Resize top",ne:"Resize top-right",e:"Resize right",se:"Resize bottom-right",s:"Resize bottom",sw:"Resize bottom-left",w:"Resize left"} as const)[handle])} onPointerDown={event => begin(event, effect, handle)} onPointerMove={event => {event.stopPropagation(); move(event);}} onPointerUp={event => {event.stopPropagation(); finish();}} onPointerCancel={event => {event.stopPropagation(); finish(true);}} onKeyDown={event => keyboard(event, effect, handle)}/>)}
     </div>)}
   </div>;

@@ -435,7 +435,6 @@
   "Effect %d: %@ to %@": "Effect %d: %@ to %@",
   "Effect %d start": "Effect %d start",
   "Effect %d end": "Effect %d end",
-  "Annotate video": "Annotate video",
   "Annotation timing": "Annotation timing",
   "Each annotation has its own track. Drag its edges to set when it appears.": "Each annotation has its own track. Drag its edges to set when it appears.",
   "Delete annotation": "Delete annotation",
@@ -484,5 +483,16 @@
   "Source out": "Source out",
   "%d effects outside the edit": "%d effects outside the edit",
   "These effects stay saved but do not appear in this export.": "These effects stay saved but do not appear in this export.",
-  "Changing clip speed also changes audio pitch on Windows.": "Changing clip speed also changes audio pitch on Windows."
+  "Changing clip speed also changes audio pitch on Windows.": "Changing clip speed also changes audio pitch on Windows.",
+  "Sticker": "Sticker",
+  "Add image sticker": "Add image sticker",
+  "Delete sticker": "Delete sticker",
+  "Drag to move. Resize with the handles; set timing on its track.": "Drag to move. Resize with the handles; set timing on its track.",
+  "Choose a PNG, JPEG or WebP image up to 10 MB and 16 megapixels.": "Choose a PNG, JPEG or WebP image up to 10 MB and 16 megapixels.",
+  "Import media": "Import media",
+  "Importing…": "Importing…",
+  "Import local images or videos": "Import local images or videos",
+  "Drop images or videos to import": "Drop images or videos to import",
+  "Imported %d files; %d could not be imported.": "Imported %d files; %d could not be imported.",
+  "Could not import these files. Choose supported local images or videos.": "Could not import these files. Choose supported local images or videos."
 }

@@ -116,7 +116,7 @@ export interface AppearanceSettings {
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
-  colorPreset: "violet",
+  colorPreset: "cherry",
   textBackgroundStyle: "transparent",
   mosaicIntensity: "standard",
   mosaicStyle: "pixel",

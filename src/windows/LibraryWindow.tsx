@@ -2,6 +2,8 @@
 // notices, and error recovery. Port of LibraryView.swift + AppModel.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {getCurrentWebview} from "@tauri-apps/api/webview";
+import {ImagePlus} from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   api,
@@ -707,11 +709,35 @@ export function LibraryWindow() {
     ],
   );
 
+  const [mediaImportBusy,setMediaImportBusy]=useState(false);
+  const mediaImporting=useRef(false);
+  const [mediaDrop,setMediaDrop]=useState(false);
+  const [mediaImportMessage,setMediaImportMessage]=useState("");
+  const importMedia=useCallback(async(paths?:string[])=>{
+    if(mediaImporting.current||libraryStatus?.availability!=="ready")return;
+    mediaImporting.current=true;setMediaImportBusy(true);setMediaImportMessage("");
+    try{const result=await api.importMedia(paths);if(result.ids.length||result.failed)setMediaImportMessage(fmt("Imported %d files; %d could not be imported.",result.ids.length,result.failed));await refresh();}
+    catch{setMediaImportMessage(t("Could not import these files. Choose supported local images or videos."));}
+    finally{mediaImporting.current=false;setMediaImportBusy(false);}
+  },[libraryStatus?.availability,refresh]);
+  useEffect(()=>{
+    let disposed=false;let stop:(()=>void)|undefined;
+    void getCurrentWebview().onDragDropEvent(event=>{
+      if(disposed)return;
+      const type=event.payload.type;
+      setMediaDrop(type==="enter"||type==="over");
+      if(type==="drop")void importMedia(event.payload.paths);
+    }).then(unlisten=>{if(disposed)unlisten();else stop=unlisten;}).catch(()=>{});
+    return()=>{disposed=true;stop?.();};
+  },[importMedia]);
+
   return (
     <div
       className="library-root kiri-canvas-surface"
       style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}
     >
+      {mediaDrop&&<div className="library-media-drop">{t("Drop images or videos to import")}</div>}
+      {mediaImportMessage&&<div className="library-import-status" role="status">{mediaImportMessage}</div>}
       {/* The top controls form one workspace: identity and global navigation
           above, contextual asset filters in an inset rail below. */}
       <header className="library-control-panel">
@@ -743,6 +769,7 @@ export function LibraryWindow() {
           </div>
 
           <div className="library-control-panel__actions">
+            {destination==="captures"&&!showingTrash&&<button type="button" className="kiri-button kiri-button--secondary" disabled={mediaImportBusy||libraryStatus?.availability!=="ready"} title={t("Import local images or videos")} onClick={()=>void importMedia()}><ImagePlus size={15}/>{t(mediaImportBusy?"Importing…":"Import media")}</button>}
             {destination === "captures" &&
               !libraryStatusError &&
               libraryStatus?.availability === "ready" && (

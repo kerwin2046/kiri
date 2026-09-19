@@ -435,7 +435,6 @@
   "Effect %d: %@ to %@": "エフェクト %d：%@〜%@",
   "Effect %d start": "エフェクト %d の開始",
   "Effect %d end": "エフェクト %d の終了",
-  "Annotate video": "動画に注釈",
   "Annotation timing": "注釈の表示時間",
   "Each annotation has its own track. Drag its edges to set when it appears.": "注釈ごとに独立したトラックがあります。両端をドラッグして表示時間を調整できます。",
   "Delete annotation": "注釈を削除",
@@ -484,5 +483,16 @@
   "Source out": "元動画の終了",
   "%d effects outside the edit": "編集範囲外のエフェクト：%d",
   "These effects stay saved but do not appear in this export.": "これらのエフェクトは保持されますが、今回の書き出しには含まれません。",
-  "Changing clip speed also changes audio pitch on Windows.": "Windows ではクリップ速度を変更すると音程も変わります。"
+  "Changing clip speed also changes audio pitch on Windows.": "Windows ではクリップ速度を変更すると音程も変わります。",
+  "Sticker": "ステッカー",
+  "Add image sticker": "画像ステッカーを追加",
+  "Delete sticker": "ステッカーを削除",
+  "Drag to move. Resize with the handles; set timing on its track.": "ドラッグで移動、ハンドルでサイズ変更。表示時間はトラックで調整できます。",
+  "Choose a PNG, JPEG or WebP image up to 10 MB and 16 megapixels.": "10 MB・1600万画素以下の PNG、JPEG、WebP 画像を選択してください。",
+  "Import media": "メディアを読み込む",
+  "Importing…": "読み込み中…",
+  "Import local images or videos": "ローカルの画像や動画を読み込む",
+  "Drop images or videos to import": "画像や動画をドロップして読み込む",
+  "Imported %d files; %d could not be imported.": "%d 個を読み込みました。%d 個は読み込めませんでした。",
+  "Could not import these files. Choose supported local images or videos.": "読み込めませんでした。ローカルの PNG・JPEG・WebP 画像、MP4・MOV 動画を選択してください。"
 }

@@ -87,6 +87,8 @@ export function createLibraryHarness(apiOverrides = {}, componentSource = null) 
   };
   const modules = {
     react: React,
+    "@tauri-apps/api/webview": {getCurrentWebview:()=>({onDragDropEvent:subscribe("mediaDrop")})},
+    "lucide-react": {ImagePlus:"icon"},
     "./text-history.css": {},
     "../ocr/TextHistory": { TextHistory: "text-history", OcrDialog: "ocr-dialog" },
     "react-dom": { createPortal: (child) => child },
