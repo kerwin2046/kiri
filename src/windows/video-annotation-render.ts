@@ -18,8 +18,6 @@ export function paintVideoAnnotation(ctx:CanvasRenderingContext2D, mark:Annotati
     scratch.getContext("2d")?.drawImage(ctx.canvas,0,0,sourceSize.width,sourceSize.height);
   }
   const render = context(ctx,scratch,sourceSize);
-  const transform=ctx.getTransform();
-  render.filterScale=Math.min(Math.hypot(transform.a,transform.b),Math.hypot(transform.c,transform.d));
   ctx.save(); drawMark(mark,render,ctx); ctx.restore();
 }
 

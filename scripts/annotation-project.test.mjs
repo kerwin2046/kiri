@@ -50,10 +50,13 @@ async function loadAnnotationRender() {
   ).outputText;
   const modelUrl = moduleDataUrl(modelJavaScript);
   const textLayoutUrl = new URL("../src/annotation/text-layout.js", import.meta.url).href;
+  const blurSource=await readFile(new URL("../src/annotation/canvas-blur.ts",import.meta.url),'utf8');
+  const blurUrl=moduleDataUrl(ts.transpileModule(blurSource,TRANSPILE_OPTIONS).outputText);
   const renderJavaScript = ts.transpileModule(
     renderSource
       .replaceAll('"./model"', JSON.stringify(modelUrl))
       .replaceAll('"./geom"', JSON.stringify(geomUrl))
+      .replaceAll('"./canvas-blur"', JSON.stringify(blurUrl))
       .replaceAll('"./text-layout.js"', JSON.stringify(textLayoutUrl)),
     TRANSPILE_OPTIONS,
   ).outputText;
@@ -383,4 +386,22 @@ test("blur mosaic export maps its document radius through the stroke scale", asy
   assert.equal(mosaicBlurRadius(20, "soft", scale), 8);
   assert.equal(mosaicBlurRadius(20, "standard", scale), 10);
   assert.equal(mosaicBlurRadius(20, "strong", scale), 14);
+});
+
+test('privacy blur softens actual pixels and keeps transparent edges free of hidden colors',async()=>{
+ const source=await readFile(new URL('../src/annotation/canvas-blur.ts',import.meta.url),'utf8');
+ const {blurRgba}=await import(moduleDataUrl(ts.transpileModule(source,TRANSPILE_OPTIONS).outputText));
+ const width=31,height=31,data=new Uint8ClampedArray(width*height*4);
+ for(let i=0;i<data.length;i+=4){data[i+2]=255;data[i+3]=255;}
+ for(let y=14;y<=16;y++)for(let x=14;x<=16;x++){const i=(y*width+x)*4;data[i+1]=255;data[i+2]=0;}
+ const weak=data.slice(),strong=data.slice();blurRgba(weak,width,height,2);blurRgba(strong,width,height,5);
+ const center=(15*width+15)*4,neighbor=(15*width+10)*4;
+ assert.ok(weak[center+1]>strong[center+1]);assert.ok(weak[center+1]<200);
+ assert.ok(strong[neighbor+1]>0);assert.equal(strong[center+3],255);
+ const transparent=new Uint8ClampedArray(9*4);
+ for(let i=0;i<transparent.length;i+=4)transparent[i]=255;
+ transparent.set([0,0,255,255],4*4);blurRgba(transparent,9,1,2);
+ assert.equal(transparent[4*4],0);assert.equal(transparent[4*4+2],255);
+ const uniform=new Uint8ClampedArray([20,80,140,255]);blurRgba(uniform,1,1,20);
+ assert.deepEqual([...uniform],[20,80,140,255]);
 });

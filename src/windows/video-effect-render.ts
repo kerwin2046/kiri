@@ -1,5 +1,6 @@
 import {videoEffectEnvelope,videoFrameRect,videoZoomViewport,type VideoEffect} from "./video-effects";
 import {orderedVideoLayers} from "./video-layers";
+import {blurCanvas} from "../annotation/canvas-blur";
 
 /** Masks cover annotations too, matching native composition before zoom. */
 export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect[],scratch:HTMLCanvasElement) {
@@ -23,17 +24,12 @@ export function paintVideoMasks(ctx:CanvasRenderingContext2D,effects:VideoEffect
       ctx.drawImage(scratch,0,0,scratch.width,scratch.height,x,y,w,h);
     } else {
       const radius=Math.max(1,width*(.003+.027*strength)),pad=Math.ceil(radius*3);
-      scratch.width=width+2*pad;scratch.height=height+2*pad;
-      sample.drawImage(ctx.canvas,pad,pad);
-      // Clamp source edges before blurring; transparent margins would leak sharp pixels.
-      sample.drawImage(ctx.canvas,0,0,width,1,pad,0,width,pad);
-      sample.drawImage(ctx.canvas,0,height-1,width,1,pad,pad+height,width,pad);
-      sample.drawImage(ctx.canvas,0,0,1,height,0,pad,pad,height);
-      sample.drawImage(ctx.canvas,width-1,0,1,height,pad+width,pad,pad,height);
-      for(const [sx,sy,tx,ty] of [[0,0,0,0],[width-1,0,pad+width,0],[0,height-1,0,pad+height],[width-1,height-1,pad+width,pad+height]])sample.drawImage(ctx.canvas,sx,sy,1,1,tx,ty,pad,pad);
+      const sx=Math.max(0,x-pad),sy=Math.max(0,y-pad),sw=Math.min(width,x+w+pad)-sx,sh=Math.min(height,y+h+pad)-sy;
+      scratch.width=sw;scratch.height=sh;
+      sample.drawImage(ctx.canvas,sx,sy,sw,sh,0,0,sw,sh);
+      blurCanvas(scratch,radius);
       ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
-      ctx.filter=`blur(${radius}px)`;
-      ctx.drawImage(scratch,-pad,-pad);
+      ctx.drawImage(scratch,sx,sy);
     }
     ctx.restore();
   }

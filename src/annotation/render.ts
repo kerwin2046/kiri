@@ -11,6 +11,7 @@ import { COLOR_HEX, MOSAIC_VIEW_BLOCK_SIZE, arrowHeadPoints, selectionBounds } f
 import type { Point, Rect } from "./geom";
 import { inset, intersection, maxX, maxY, minX, minY, standardized } from "./geom";
 import { layoutTextLines } from "./text-layout.js";
+import {blurCanvas} from "./canvas-blur";
 
 const FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -50,8 +51,6 @@ export interface RenderContext {
   viewScaleY: number;
   /** True when rendering the export bitmap in pixel space. */
   exporting: boolean;
-  /** Canvas filters operate in destination bitmap pixels, independent of transform. */
-  filterScale?: number;
 }
 
 export interface RenderGeometryScale {
@@ -341,10 +340,9 @@ function drawMosaicMark(
     const offCtx = off.getContext("2d")!;
     offCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
     const blurPx = mosaicBlurRadius(mark.brushDiameter, mark.intensity, scale);
+    blurCanvas(off,blurPx*cw/drawW);
     clipToMosaicStroke(ctx, points, clipDiameter);
-    ctx.filter = `blur(${blurPx * (r.filterScale ?? 1)}px)`;
     ctx.drawImage(off, 0, 0, cw, ch, drawX, drawY, drawW, drawH);
-    ctx.filter = "none";
     ctx.restore();
     return;
   }

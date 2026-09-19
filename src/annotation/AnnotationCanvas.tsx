@@ -315,7 +315,6 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         viewScaleX,
         viewScaleY,
         exporting: false,
-        filterScale: documentChangeRef.current ? devicePixelRatio * Math.min(viewScaleX, viewScaleY) : undefined,
       };
       renderAll(context, marks, {
         draft,
