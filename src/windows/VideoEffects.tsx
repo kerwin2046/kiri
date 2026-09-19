@@ -115,7 +115,8 @@ export function VideoEffectsOverlay(props: VideoEffectsProps) {
     const step = event.shiftKey ? 0.02 : 0.002;
     const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
     const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
-    const next = handle ? (props.regionLabel?resizeSticker(effect,dx,dy,handle):resizeVideoEffectFromHandle(effect, dx, dy, handle)) : moveVideoEffect(effect, dx, dy);
+    const pan=effect.kind==="zoom"||effect.kind==="frame";
+    const next = handle ? (props.regionLabel?resizeSticker(effect,dx,dy,handle):resizeVideoEffectFromHandle(effect, dx, dy, handle)) : moveVideoEffect(effect, pan?-dx:dx, pan?-dy:dy);
     props.onChange(props.effects.map(item => item.id === next.id ? next : item));
   }
   const clip=props.transform?.clip;

@@ -23,13 +23,14 @@ export function VideoOutputEffectTracks(props:Props){
   }
   function begin(event:PointerEvent<HTMLElement>,effect:VideoEffect,range:ProjectedRange,mode:Mode){
     if(props.disabled||event.button!==0)return;
-    const rect=event.currentTarget.closest(".kiri-video-effect-track")?.getBoundingClientRect();if(!rect?.width||!total)return;
+    const target=event.currentTarget.closest<HTMLElement>(".kiri-video-effect-track"),rect=target?.getBoundingClientRect();if(!target||!rect?.width||!total)return;
     event.preventDefault();event.stopPropagation();cleanupGesture.current?.();
-    const target=event.currentTarget,origin=event.clientX,original=props.effects;
+    const origin=event.clientX,original=props.effects;
     const startOutput=(origin-rect.left)/rect.width*total;
     const startSource=sourceAtOutput(props.segments,Math.max(0,Math.min(total,startOutput)))?.time??range.sourceStart;
     let latest=original,moved=false;
-    target.focus();target.setPointerCapture(event.pointerId);select(effect,range);
+    // Projected bars disappear when a layer crosses a cut. Capture on the stable row.
+    event.currentTarget.focus();target.setPointerCapture(event.pointerId);select(effect,range);
     const move=(e:globalThis.PointerEvent)=>{
       if(!moved&&Math.abs(e.clientX-origin)<3)return;
       moved=true;
@@ -41,7 +42,9 @@ export function VideoOutputEffectTracks(props:Props){
       const next=retimeVideoLayer(effect,mode,delta,original,props.sourceDuration);
       latest=original.map(item=>item.id===effect.id?next:item);
       props.onChange(latest,true);
-      props.onSeek(mode==="end"?next.end-.001:next.start+Math.min(next.transition??0,(next.end-next.start)/2));
+      const projected=projectTimedRange(props.segments,next.start,next.end);
+      const shown=projected.find(item=>item.index===destination.index)??projected[0];
+      if(shown)props.onSeek(mode==="end"?shown.sourceEnd-.001:Math.min(shown.sourceEnd-.001,shown.sourceStart+Math.min(next.transition??0,(next.end-next.start)/2)));
     };
     const cleanup=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",cancel);target.removeEventListener("lostpointercapture",cancel);window.removeEventListener("keydown",key,true);cleanupGesture.current=null;};
     const finish=()=>{cleanup();if(moved)props.onChange(latest,false);};
