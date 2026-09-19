@@ -202,14 +202,17 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     if(!editing || !player || !output) return;
     const buffer=document.createElement("canvas");
     const scale=Math.min(1,1280/Math.max(sourceSize.width,sourceSize.height));
-    buffer.width=output.width=Math.max(1,Math.round(sourceSize.width*scale));
-    buffer.height=output.height=Math.max(1,Math.round(sourceSize.height*scale));
+    buffer.width=Math.max(1,Math.round(sourceSize.width*scale));
+    buffer.height=Math.max(1,Math.round(sourceSize.height*scale));
+    // Preserve the last presented frame while a paused WebKit seek is decoding.
+    if(output.width!==buffer.width)output.width=buffer.width;
+    if(output.height!==buffer.height)output.height=buffer.height;
     const maskScratch=document.createElement("canvas");
     const sourceFrame=document.createElement("canvas");sourceFrame.width=sourceSize.width;sourceFrame.height=sourceSize.height;
     const frameCtx=sourceFrame.getContext("2d");
     const sourceCtx=buffer.getContext("2d"),ctx=output.getContext("2d");
     if(!sourceCtx || !ctx || !frameCtx) return;
-    let frame=0;
+    let frame=0,repaintAttempts=3,decodedFrame=0;
     const draw=()=>{
       cancelAnimationFrame(frame);
       const clip=docRef.current.segments[playbackIndex.current];
@@ -228,11 +231,19 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
         paintVideoEffects(sourceCtx,active,player.currentTime,maskScratch);
         ctx.clearRect(0,0,output.width,output.height);ctx.drawImage(buffer,0,0);
       }
-      if(!player.paused) frame=requestAnimationFrame(draw);
+      if(!player.paused||repaintAttempts-->0) frame=requestAnimationFrame(draw);
+    };
+    const redraw=()=>{
+      repaintAttempts=3;draw();
+      // seeked can precede presentation of the decoded frame in WKWebView.
+      if(player.requestVideoFrameCallback){
+        if(decodedFrame)player.cancelVideoFrameCallback(decodedFrame);
+        decodedFrame=player.requestVideoFrameCallback(()=>{decodedFrame=0;draw();});
+      }
     };
     const events=["seeked","loadeddata","play","pause"];
-    redrawComposite.current=draw;events.forEach(event=>player.addEventListener(event,draw)); draw();
-    return()=>{redrawComposite.current=null;cancelAnimationFrame(frame);events.forEach(event=>player.removeEventListener(event,draw));};
+    redrawComposite.current=draw;events.forEach(event=>player.addEventListener(event,redraw)); redraw();
+    return()=>{redrawComposite.current=null;cancelAnimationFrame(frame);if(decodedFrame)player.cancelVideoFrameCallback(decodedFrame);events.forEach(event=>player.removeEventListener(event,redraw));};
   },[editing,effectId,annotating,effects,annotations,stickers,sourceSize]);
 
   useEffect(()=>{
