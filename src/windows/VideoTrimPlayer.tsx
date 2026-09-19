@@ -7,7 +7,7 @@ import { useVideoThumbnails } from "./useVideoThumbnails";
 import { VideoEffectsControls, VideoEffectsOverlay } from "./VideoEffects";
 import {defaultOverlayRange, effectLabels, videoPreviewTransform, type VideoEffect} from "./video-effects";
 import {paintVideoEffect,paintVideoEffects} from "./video-effect-render";
-import {isVideoAdjustment,nextVideoLayer,orderedVideoLayers} from "./video-layers";
+import {isVideoAdjustment,nextVideoLayer,orderedVideoLayers,videoLayerPreviewTime} from "./video-layers";
 import "./video-trim.css";
 import {VideoOutputEffectTracks} from "./VideoOutputEffectTracks";
 import {ChoiceSelect} from "../components/ChoiceSelect";
@@ -345,7 +345,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
       const width=Math.min(.3,.3*ratio/sourceRatio),height=width*sourceRatio/ratio;
       const {start,end}=defaultOverlayRange(video.current?.currentTime??time,duration);
       const item:VideoSticker={layer:nextVideoLayer([...current.effects,...current.annotations,...current.stickers]),id:`sticker-${crypto.randomUUID()}`,start,end,x:(1-width)/2,y:(1-height)/2,width,height,dataUrl};
-      stickerImages.current.set(item.id,image);apply({...current,stickers:[...current.stickers,item]});setAnnotating(false);setAnnotationId(null);setEffectId(item.id);seek(start);
+      stickerImages.current.set(item.id,image);apply({...current,stickers:[...current.stickers,item]});setAnnotating(false);setAnnotationId(null);setEffectId(item.id);seek(videoLayerPreviewTime(start,end));
     }catch{if(alive.current)setStickerError(true);}finally{if(alive.current)setImporting(false);}
   }
 

@@ -3,7 +3,7 @@ import {Focus,Shield,Pencil,Scan,Frame,SunMoon,GripVertical} from "lucide-react"
 import {fmt,t} from "../i18n";
 import {projectTimedRange,timelineDuration,sourceAtOutput,type VideoSegment,type ProjectedRange} from "./video-trim.js";
 import {effectLabels,type VideoEffect} from "./video-effects";
-import {isVideoAdjustment,moveVideoLayer,orderedVideoLayers,retimeVideoLayer} from "./video-layers";
+import {isVideoAdjustment,moveVideoLayer,orderedVideoLayers,retimeVideoLayer,videoLayerPreviewTime} from "./video-layers";
 
 type Props={effects:VideoEffect[];segments:VideoSegment[];sourceDuration:number;playhead:number;labels:Record<string,string>;selectedId:string|null;disabled:boolean;onSelect(id:string):void;onSeek(sourceTime:number):void;onChange(effects:VideoEffect[],transient?:boolean):void};
 type Mode="move"|"start"|"end";
@@ -19,7 +19,7 @@ export function VideoOutputEffectTracks(props:Props){
   const visible=rows.filter(row=>row.ranges.length),hidden=rows.filter(row=>!row.ranges.length);
   function select(effect:VideoEffect,range=projectTimedRange(props.segments,effect.start,effect.end)[0]){
     props.onSelect(effect.id);
-    if(range)props.onSeek(Math.min(range.sourceEnd-.001,range.sourceStart+Math.min(effect.transition??0,(effect.end-effect.start)/2)));
+    if(range)props.onSeek(videoLayerPreviewTime(range.sourceStart,range.sourceEnd,effect.transition));
   }
   function begin(event:PointerEvent<HTMLElement>,effect:VideoEffect,range:ProjectedRange,mode:Mode){
     if(props.disabled||event.button!==0)return;
@@ -44,7 +44,7 @@ export function VideoOutputEffectTracks(props:Props){
       props.onChange(latest,true);
       const projected=projectTimedRange(props.segments,next.start,next.end);
       const shown=projected.find(item=>item.index===destination.index)??projected[0];
-      if(shown)props.onSeek(mode==="end"?shown.sourceEnd-.001:Math.min(shown.sourceEnd-.001,shown.sourceStart+Math.min(next.transition??0,(next.end-next.start)/2)));
+      if(shown)props.onSeek(videoLayerPreviewTime(shown.sourceStart,shown.sourceEnd,next.transition,mode==="end"?"end":"start"));
     };
     const cleanup=()=>{target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",finish);target.removeEventListener("pointercancel",cancel);target.removeEventListener("lostpointercapture",cancel);window.removeEventListener("keydown",key,true);cleanupGesture.current=null;};
     const finish=()=>{cleanup();if(moved)props.onChange(latest,false);};
@@ -78,7 +78,9 @@ export function VideoOutputEffectTracks(props:Props){
   }
   function adjust(effect:VideoEffect,range:ProjectedRange,mode:Mode,delta:number){
     const next=retimeVideoLayer(effect,mode,delta*range.speed,props.effects,props.sourceDuration);
-    props.onSelect(effect.id);props.onChange(props.effects.map(item=>item.id===effect.id?next:item));props.onSeek(mode==="end"?next.end-.001:next.start);
+    props.onSelect(effect.id);props.onChange(props.effects.map(item=>item.id===effect.id?next:item));
+    const ranges=projectTimedRange(props.segments,next.start,next.end),shown=ranges.find(item=>item.index===range.index)??ranges[0];
+    if(shown)props.onSeek(videoLayerPreviewTime(shown.sourceStart,shown.sourceEnd,next.transition,mode==="end"?"end":"start"));
   }
   function stepLayer(effect:VideoEffect,direction:number){
     const peers=rows.filter(row=>isVideoAdjustment(row.effect)===isVideoAdjustment(effect));

@@ -140,7 +140,20 @@ test("portrait crop and background preserve aspect, and pointer transform follow
 
 const layerSource=readFileSync(new URL('../src/windows/video-layers.ts',import.meta.url),'utf8');
 const layerCompiled=ts.transpileModule(layerSource,{compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.ESNext}}).outputText;
-const {orderedVideoLayers,moveVideoLayer,retimeVideoLayer}=await import(`data:text/javascript;base64,${Buffer.from(layerCompiled).toString('base64')}`);
+const {orderedVideoLayers,moveVideoLayer,retimeVideoLayer,videoLayerPreviewTime}=await import(`data:text/javascript;base64,${Buffer.from(layerCompiled).toString('base64')}`);
+
+test('selecting a fractional track boundary stays visible after native seek rounding',()=>{
+ const start=.2044989,end=1.97137;
+ const nativeTime=value=>Math.floor(value*600000)/600000;
+ assert.ok(nativeTime(start)<start,'the boundary reproduces the WKWebView seek rounding');
+ assert.equal(activeVideoEffects([{...createVideoEffect('mask',0,4,[]),start,end}],nativeTime(videoLayerPreviewTime(start,end))).length,1);
+ assert.ok(nativeTime(videoLayerPreviewTime(start,end,0,'end'))<end);
+ // A cut can expose less than a millisecond of an otherwise long effect.
+ for(const edge of ['start','end']){
+  const seek=videoLayerPreviewTime(2,2.0005,.35,edge);
+  assert.ok(seek>2&&seek<2.0005);
+ }
+});
 
 test('track order changes the overlay stack, preserves timing and keeps whole-picture adjustments separate',()=>{
  const items=[{id:'ink',mark:{kind:'rectangle'},layer:1,start:1,end:3},{id:'mask',kind:'mask',layer:2,start:0,end:4},{id:'zoom',kind:'zoom',layer:3,start:1,end:3}];

@@ -3,7 +3,7 @@ import type {KeyboardEvent,PointerEvent} from "react";
 import {Focus,Shield,Trash2,Scan,Frame,SunMoon,ChevronLeft,ChevronRight,ChevronDown} from "lucide-react";
 import {t} from "../i18n";
 import {activeVideoEffects,clamp,createVideoEffect,moveVideoEffect,resizeVideoEffectFromHandle,validVideoEffect,cropVideoFrame,effectLabels,videoFrameRect,videoPreviewTransform,videoZoomViewport} from "./video-effects";
-import {videoLayerRank} from "./video-layers";
+import {videoLayerRank,videoLayerPreviewTime} from "./video-layers";
 import type {VideoEffect,EffectHandle} from "./video-effects";
 import {videoTimeLabel} from "./video-trim.js";
 import {VideoTimeInput} from "./VideoTimeInput";
@@ -24,7 +24,7 @@ const effectDescriptions={
 export function VideoEffectsControls(props:VideoEffectsProps){
   const [error,setError]=useState(false);
   const selected=props.effects.find(effect=>effect.id===props.selectedId);
-  function add(kind:VideoEffect["kind"]){const effect=createVideoEffect(kind,props.time,props.duration,props.effects);if(!effect){setError(true);return;}setError(false);props.onChange([...props.effects,effect]);props.onSelect(effect.id);props.onSeek?.(effect.start+Math.min(effect.transition??0,(effect.end-effect.start)/2));}
+  function add(kind:VideoEffect["kind"]){const effect=createVideoEffect(kind,props.time,props.duration,props.effects);if(!effect){setError(true);return;}setError(false);props.onChange([...props.effects,effect]);props.onSelect(effect.id);props.onSeek?.(videoLayerPreviewTime(effect.start,effect.end,effect.transition));}
   function update(next:VideoEffect,transient=false){if(!validVideoEffect(next,props.effects,props.duration)){setError(true);return;}setError(false);props.onChange(props.effects.map(effect=>effect.id===next.id?next:effect),transient);}
   const transition=selected?Math.min(selected.transition??0,(selected.end-selected.start)/2):0;
   const blocked=props.disabled||props.duration<.05||props.effects.length>=128;

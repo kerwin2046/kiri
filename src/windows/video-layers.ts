@@ -13,6 +13,11 @@ export function videoLayerRank(item:VideoLayer):number {
 export function nextVideoLayer(items:VideoLayer[]):number {
   return Math.max(-1,...items.map(videoLayerRank))+1;
 }
+/** Native players round seek times. Stay inside the visible range, including at cuts. */
+export function videoLayerPreviewTime(start:number,end:number,transition=0,edge:"start"|"end"="start"):number {
+  const inset=Math.min(.001,(end-start)/2);
+  return edge==="end"?end-inset:start+Math.min(Math.max(inset,transition),(end-start)/2);
+}
 export function orderedVideoLayers<T extends VideoLayer>(items:T[]):T[] {
   return [...items].sort((a,b)=>Number(isVideoAdjustment(a))-Number(isVideoAdjustment(b))||videoLayerRank(a)-videoLayerRank(b));
 }
