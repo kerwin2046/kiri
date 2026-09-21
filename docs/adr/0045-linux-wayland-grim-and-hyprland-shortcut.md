@@ -1,12 +1,12 @@
-# ADR 0035: Linux Wayland frozen capture and Hyprland shortcut
+# ADR 0045: Linux Wayland frozen capture and Hyprland shortcut
 
 ## Status
 
-Accepted (amends [ADR 0034](0034-linux-screenshot-mvp.md))
+Accepted (amends [ADR 0044](0044-linux-screenshot-mvp.md))
 
 ## Context
 
-ADR 0034 chose xdg-desktop-portal Screenshot for Linux frozen stills and assumed
+ADR 0044 chose xdg-desktop-portal Screenshot for Linux frozen stills and assumed
 `tauri-plugin-global-shortcut` could register `Shift+Ctrl+A` the same way as on
 Windows. On Hyprland and similar wlroots sessions that path fails in practice:
 
@@ -31,7 +31,7 @@ Hyprland Lua configs reject `hyprctl keyword` and require `hyprctl eval` with
    no-downloaded-media-executable contract: grim is a host tool, not a
    fetched encoder.
 2. Keep portal **ScreenCast** → PipeWire → system GStreamer for region
-   recording unchanged from ADR 0034.
+   recording unchanged from ADR 0044.
 3. On Hyprland, skip the X11 global-shortcut plugin grab. Install
    `CTRL + SHIFT + A` through `hyprctl eval 'hl.bind(...)'` (legacy
    `keyword bind` remains a fallback) so the compositor writes a FIFO under
@@ -52,6 +52,6 @@ Hyprland Lua configs reject `hyprctl keyword` and require `hyprctl eval` with
   portal-only sessions separately.
 - Product docs must mention the optional `grim` dependency for reliable
   wlroots stills and that Hyprland registers the shortcut via the compositor.
-- ADR 0034 remains the staged Linux product scope (recording limits, AppImage,
+- ADR 0044 remains the staged Linux product scope (recording limits, AppImage,
   no local OCR yet); this ADR only replaces the frozen-still and shortcut
   mechanisms where Wayland reality required it.

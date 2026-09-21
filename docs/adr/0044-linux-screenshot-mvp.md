@@ -1,4 +1,4 @@
-# ADR 0034: Linux screenshot MVP and staged recording
+# ADR 0044: Linux screenshot MVP and staged recording
 
 ## Status
 
@@ -42,6 +42,6 @@ no-downloaded-FFmpeg media contract make a single-step full parity port unsafe.
 ## Amendment
 
 Frozen stills and Wayland shortcut registration are refined in
-[ADR 0035](0035-linux-wayland-grim-and-hyprland-shortcut.md) (`grim` preferred,
+[ADR 0045](0045-linux-wayland-grim-and-hyprland-shortcut.md) (`grim` preferred,
 Hyprland compositor bind, fullscreen overlay geometry). Recording still follows
 this ADR's ScreenCast + system GStreamer path.
